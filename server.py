@@ -5,6 +5,7 @@ Project: debug-test-001
 Port: 8080
 """
 
+import atexit
 import json
 import sqlite3
 import os
@@ -13,6 +14,7 @@ import sys
 import math
 import time
 import base64
+import signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from datetime import datetime
@@ -607,6 +609,7 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     """Multi-threaded HTTP server for concurrent requests."""
     daemon_threads = True
+    allow_reuse_address = True  # fix TIME_WAIT port leak on restart
 
 
 def run_server(port=PORT):
@@ -627,10 +630,41 @@ def run_server(port=PORT):
     print(f'Relationships loaded: {len(SAMPLE_RELATIONSHIPS)}')
     
     try:
+        # Register clean shutdown for SIGINT/SIGTERM (Ctrl+C, taskkill, etc.)
+        def _shutdown(signum=None, frame=None):
+            print('\nShutting down server...')
+            server.shutdown()
+            # Force-close all threads
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+
+        # Also register atexit as a safety net
+        def _atexit_cleanup():
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+
+        atexit.register(_atexit_cleanup)
+
+        print(f'Server running at http://localhost:{port}')
+        print(f'Project: {PROJECT_ID}')
+        print(f'Database: {DB_PATH}')
+        print(f'Facts loaded: {len(SAMPLE_FACTS)}')
+        print(f'Relationships loaded: {len(SAMPLE_RELATIONSHIPS)}')
+        print(f'Press Ctrl+C to stop.\n')
+
         server.serve_forever()
     except KeyboardInterrupt:
         print('\nShutting down server...')
         server.shutdown()
+    finally:
+        try:
+            server.server_close()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
