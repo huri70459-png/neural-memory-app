@@ -40,21 +40,39 @@ that runs with no DB server, no Docker, no API key. Competitors trade portabilit
 | Tier 3 | Fact linking UI (drag to create relationships), multi-project | TODO |
 | Tier 4 | Analytics dashboard, temporal memory views | TODO |
 
-## Phase 3: HTML Blueprint Prototype — Next
+## Phase 3: HTML Blueprint ✅
+**Status:** Complete
+
+- `blueprint_v2.html` — 43KB interactive prototype
+- **Monitor surface** archetype: density + glanceable hierarchy (no hero+3 cards)
+- D3.js v7 force-directed graph with category-colored nodes (10 categories)
+- Semantic search input with live filtering on facts list
+- CRUD fact manager: create/edit/delete with form validation
+- Dark/light theme toggle with CSS variables
+- Node detail modal with connection traversal
+- Graph search highlighting + legend with category colors
+- All DESIGN.md tokens mapped to `:root` CSS variables
+- Slop self-audit: 0/10 (clean — no tech gradients, no unearned blur, no hero+3 cards)
+
+## Phase 4: TDD Build — Next
 **Status:** Pending
 
-Use `claude-design` skill to create an interactive HTML blueprint for the V2 UI:
-- Monitor surface archetype (density + glanceable hierarchy)
-- D3 force graph with category-colored nodes
-- Semantic search input with results highlighting
-- CRUD fact manager with form validation
-- Dark theme matching DESIGN.md tokens
-
-## Phase 4: TDD Build — Pending
 Following `design-led-tdd-workflow`:
-1. Write DESIGN.md blueprint features as test cases
-2. RED → GREEN → COMMIT for each Tier 1 feature
-3. Regression test after each tier
+
+### Tier 1: Semantic Search (cosine similarity on embeddings)
+- RED test: `/api/search?q=memory&semantic=true` returns facts with similarity scores
+- GREEN: Add cosine similarity computation using stored embeddings
+- Test: `python test_api.py` must still pass all existing tests (80/80)
+
+### Tier 1: Relationship Management UI
+- RED test: POST to `/api/facts` with `method: LINK` creates relationship
+- GREEN: Add LINK method handler in server.py + UI button in blueprint
+- Test: Relationship appears in graph endpoint
+
+### Future Tiers (Phase 5-7)
+- Tier 2: Theme toggle endpoint, graph export (PNG/SVG)
+- Tier 3: Drag-to-link graph nodes, multi-project tags
+- Tier 4: Analytics dashboard, temporal memory views
 
 ---
 

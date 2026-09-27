@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural Memory App V2 — Blueprint</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ===== Design Tokens (from DESIGN.md) ===== */
+        :root {
+            /* Colors */
+            --color-primary: #1A1C1E;
+            --color-surface: #0F1113;
+            --color-border: #2A2E37;
+            --color-text-primary: #E0E0E0;
+            --color-text-secondary: #6B7280;
+            --color-tertiary: #4F9CF9;
+            --color-accent: #6BFF9F;
+            --color-warning: #F59E0B;
+            --color-danger: #EF4444;
+            --color-success: #10B981;
+
+            /* Graph node category colors */
+            --node-preference: #4F9CF9;
+            --node-tech-stack: #6BFF9F;
+            --node-workflow: #FF9F43;
+            --node-decision: #EF4444;
+            --node-behavior: #A78BFA;
+            --node-test: #EC4899;
+            --node-evolution: #FBBF24;
+            --node-architecture: #3B82F6;
+            --node-benchmark: #EC4899;
+            --node-general: #9CA3AF;
+
+            /* Typography */
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --font-mono: 'ui-monaco', 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+            --text-heading: 2.5rem;
+            --text-subheading: 1.2rem;
+            --text-body-lg: 1rem;
+            --text-body-md: 0.9rem;
+            --text-body-sm: 0.75rem;
+            --text-label: 0.8rem;
+
+            /* Spacing */
+            --sp-xs: 4px;
+            --sp-sm: 8px;
+            --sp-md: 16px;
+            --sp-lg: 24px;
+            --sp-xl: 32px;
+
+            /* Rounded */
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-full: 9999px;
+        }
+
+        /* Theme variants */
+        [data-theme="light"] {
+            --color-primary: #F7F5F2;
+            --color-surface: #FFFFFF;
+            --color-border: #D1D5DB;
+            --color-text-primary: #1A1C1E;
+            --color-text-secondary: #6B7280;
+            --card-bg: rgba(0, 0, 0, 0.05);
+            --input-bg: rgba(0, 0, 0, 0.03);
+        }
+
+        [data-theme="dark"] {
+            --color-primary: #1A1C1E;
+            --color-surface: #0F1113;
+            --color-border: #2A2E37;
+            --color-text-primary: #E0E0E0;
+            --color-text-secondary: #6B7280;
+            --card-bg: rgba(42, 46, 55, 0.5);
+            --input-bg: rgba(42, 46, 55, 0.5);
+        }
+
+        /* ===== Reset & Base ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: var(--font-family);
+            background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-tertiary) 100%);
+            color: var(--color-text-primary);
+            min-height: 100vh;
+            transition: background 0.3s ease;
+        }
+
+        /* ===== Layout ===== */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: var(--sp-md);
+        }
+        header {
+            text-align: center;
+            padding: var(--sp-lg) 0;
+            background: var(--card-bg, rgba(0, 0, 0, 0.1));
+            border-radius: var(--radius-lg);
+            margin-bottom: var(--sp-md);
+            border: 1px solid var(--color-border);
+            backdrop-filter: blur(10px);
+        }
+        h1 {
+            font-size: var(--text-heading);
+            color: #fff;
+            margin-bottom: var(--sp-xs);
+        }
+        .status {
+            color: #88c9d9;
+            font-size: var(--text-body-sm);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: var(--sp-md);
+            margin-bottom: var(--sp-md);
+        }
+        .grid-2-col {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        /* ===== Cards ===== */
+        .card {
+            background: var(--card-bg, rgba(255, 255, 255, 0.1));
+            border-radius: var(--radius-lg);
+            padding: var(--sp-md);
+            border: 1px solid var(--color-border);
+            backdrop-filter: blur(10px);
+        }
+        .card h2 {
+            color: #fff;
+            margin-bottom: var(--sp-sm);
+            font-size: var(--text-subheading);
+            display: flex;
+            align-items: center;
+            gap: var(--sp-xs);
+        }
+        #facts-list, #insights-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* ===== Fact Items ===== */
+        .fact-item {
+            background: var(--input-bg, rgba(255, 255, 255, 0.05));
+            padding: var(--sp-sm);
+            border-radius: var(--radius-sm);
+            margin-bottom: var(--sp-xs);
+            border-left: 4px solid var(--color-tertiary);
+        }
+        .fact-content {
+            color: var(--color-text-primary);
+            font-size: var(--text-body-md);
+        }
+        .fact-category {
+            color: #88c9d9;
+            font-size: var(--text-body-sm);
+            margin-top: var(--sp-xs);
+        }
+
+        /* ===== Graph Container ===== */
+        #graph-container {
+            background: var(--card-bg, rgba(0, 0, 0, 0.2));
+            border-radius: var(--radius-lg);
+            padding: var(--sp-md);
+            height: 500px;
+            border: 1px solid var(--color-border);
+        }
+        .loading {
+            text-align: center;
+            padding: var(--sp-md);
+            color: #88c9d9;
+        }
+        .error {
+            color: #ff6b6b;
+            padding: var(--sp-sm);
+            background: rgba(255, 107, 107, 0.2);
+            border-radius: var(--radius-sm);
+            margin-top: var(--sp-xs);
+        }
+
+        /* ===== Buttons ===== */
+        button {
+            background: linear-gradient(135deg, var(--color-tertiary), var(--color-primary));
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            font-size: var(--text-body-md);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(79, 156, 249, 0.3);
+        }
+        button.secondary {
+            background: var(--card-bg, rgba(255, 255, 255, 0.1));
+            border: 1px solid var(--color-border);
+        }
+
+        /* ===== Stats Grid ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: var(--sp-sm);
+        }
+        .stat-box {
+            text-align: center;
+            padding: var(--sp-md);
+            background: rgba(79, 156, 249, 0.2);
+            border-radius: var(--radius-md);
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--color-tertiary);
+        }
+        .stat-label {
+            color: #88c9d9;
+            font-size: var(--text-body-sm);
+            margin-top: var(--sp-xs);
+        }
+
+        /* ===== Legend ===== */
+        .legend {
+            background: var(--card-bg, rgba(0, 0, 0, 0.3));
+            border-radius: var(--radius-sm);
+            padding: var(--sp-xs) var(--sp-md);
+            margin-top: var(--sp-sm);
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--sp-xs);
+            align-items: center;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-xs);
+        }
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: var(--radius-sm);
+        }
+
+        /* ===== Modal ===== */
+        .modal {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: var(--card-bg, rgba(255, 255, 255, 0.1));
+            border-radius: var(--radius-lg);
+            padding: var(--sp-md);
+            max-width: 500px;
+            max-height: 70vh;
+            overflow-y: auto;
+            border: 1px solid var(--color-border);
+            backdrop-filter: blur(10px);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--sp-sm);
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: #ff6b6b;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        .highlight {
+            background: rgba(79, 156, 249, 0.4);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        .node.highlight circle {
+            stroke: #6bff9f !important;
+            stroke-width: 3px !important;
+            filter: drop-shadow(0 0 6px rgba(107, 255, 159, 0.6));
+        }
+        .node circle {
+            transition: stroke 0.2s, stroke-width 0.2s, filter 0.2s;
+        }
+        .node:hover circle {
+            stroke: var(--color-warning) !important;
+            stroke-width: 3px !important;
+            filter: drop-shadow(0 0 8px rgba(255, 165, 2, 0.5));
+        }
+        .edge.highlight {
+            stroke: var(--color-warning) !important;
+            stroke-width: 3px !important;
+            stroke-opacity: 1 !important;
+        }
+
+        /* ===== CRUD Form ===== */
+        #crud-form { display: none; }
+        .crud-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--sp-sm);
+            margin-bottom: var(--sp-sm);
+        }
+        .crud-grid-full { grid-column: 1 / -1; }
+        .crud-fact-list {
+            margin-top: var(--sp-sm);
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .crud-fact-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 8px;
+            background: var(--input-bg, rgba(255, 255, 255, 0.05));
+            border-radius: var(--radius-sm);
+            margin-bottom: var(--sp-xs);
+        }
+        .crud-fact-item .fact-id {
+            font-size: var(--text-body-sm);
+            color: var(--color-text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 120px;
+        }
+        .crud-fact-item .fact-preview {
+            font-size: 0.7rem;
+            color: var(--color-text-secondary);
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .crud-actions { display: flex; gap: 4px; flex-shrink: 0; }
+        .crud-actions button { padding: 2px 6px; font-size: 0.7rem; }
+
+        /* ===== Input/Select ===== */
+        input[type="text"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--color-border);
+            background: var(--input-bg, rgba(255, 255, 255, 0.15));
+            color: var(--color-text-primary);
+            font-family: var(--font-family);
+            font-size: var(--text-body-md);
+        }
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        input[type="text"]:focus,
+        textarea:focus,
+        select:focus {
+            outline: 2px solid var(--color-tertiary);
+            outline-offset: 1px;
+        }
+
+        /* ===== Theme Toggle ===== */
+        .theme-toggle {
+            position: fixed;
+            top: var(--sp-md);
+            right: var(--sp-md);
+            z-index: 100;
+            display: flex;
+            gap: var(--sp-xs);
+        }
+        .theme-toggle button {
+            padding: 6px 12px;
+            font-size: 0.75rem;
+            border-radius: var(--radius-sm);
+        }
+        .theme-toggle button.active {
+            background: var(--color-tertiary);
+            color: white;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 1024px) {
+            .grid-2-col { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 600px) {
+            .stats-grid { grid-template-columns: 1fr; }
+            h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Theme Toggle -->
+    <div class="theme-toggle">
+        <button onclick="setTheme('light')" id="theme-light">☀️ Light</button>
+        <button onclick="setTheme('dark')" id="theme-dark" class="active">🌙 Dark</button>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-brain"></i> Neural Memory App V2</h1>
+            <p class="status">ID: debug-test-001 | Port: <span id="port-status">8080</span> | Embeddings: <span id="embeddings-status">active</span></p>
+        </header>
+
+        <!-- System Stats -->
+        <div class="grid">
+            <div class="card">
+                <h2><i class="fas fa-chart-line"></i> System Stats</h2>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-value" id="facts-count">21</div>
+                        <div class="stat-label">Facts Count</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="relationships-count">5</div>
+                        <div class="stat-label">Relationships</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="status-code">200</div>
+                        <div class="stat-label">Status</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="embeddings-status-val">active</div>
+                        <div class="stat-label">Embeddings</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Health -->
+            <div class="card">
+                <h2><i class="fas fa-sync-alt"></i> API Health</h2>
+                <button id="check-health-btn">Check Health</button>
+                <div id="health-result" class="loading">Click to check health...</div>
+            </div>
+        </div>
+
+        <!-- Facts List + Insights -->
+        <div class="grid">
+            <div class="card">
+                <h2><i class="fas fa-list"></i> Facts Store</h2>
+                <input type="text" id="fact-search" placeholder="Search facts..." style="margin-bottom: 10px;">
+                <div id="facts-list">
+                    <div class="loading">Loading facts...</div>
+                </div>
+                <button onclick="refreshFacts()" style="margin-top: 10px;">Refresh Facts</button>
+            </div>
+
+            <div class="card">
+                <h2><i class="fas fa-bolt"></i> Graph Insights</h2>
+                <div id="insights-list">
+                    <div class="loading">Loading insights...</div>
+                </div>
+                <button onclick="refreshInsights()" style="margin-top: 10px;">Refresh Insights</button>
+            </div>
+        </div>
+
+        <!-- CRUD Form + Graph -->
+        <div class="grid">
+            <div class="card">
+                <h2><i class="fas fa-edit"></i> CRUD Fact Manager</h2>
+
+                <!-- Hidden CRUD Form -->
+                <div id="crud-form">
+                    <div class="crud-grid">
+                        <input type="text" id="crud-id" placeholder="Fact ID (e.g. my-fact-001)" class="crud-grid-full">
+                    </div>
+                    <div class="crud-grid">
+                        <div class="crud-grid-full">
+                            <textarea id="crud-content" placeholder="Fact content..."></textarea>
+                        </div>
+                    </div>
+                    <div class="crud-grid">
+                        <select id="crud-category">
+                            <option value="general">General</option>
+                            <option value="preference">Preference</option>
+                            <option value="tech-stack">Tech Stack</option>
+                            <option value="workflow">Workflow</option>
+                            <option value="decision">Decision</option>
+                            <option value="behavior">Behavior</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-top: 10px;">
+                        <button id="crud-save-btn" style="flex: 1;">Create Fact</button>
+                        <button onclick="cancelEdit()" class="secondary" style="flex: 0 0 auto;">Cancel</button>
+                    </div>
+                    <div id="crud-status" style="margin-top: 8px; font-size: 0.85rem;"></div>
+                </div>
+
+                <!-- Empty State -->
+                <div id="crud-empty" style="text-align: center; padding: 15px; color: #88c9d9;">
+                    Click "New Fact" to create a memory. Select a fact from the list to edit or delete.
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                    <button onclick="showNewFactForm()" style="flex: 1;"><i class="fas fa-plus"></i> New Fact</button>
+                    <button onclick="refreshFacts()" class="secondary" style="flex: 0 0 auto;"><i class="fas fa-sync-alt"></i> Refresh</button>
+                </div>
+                <div id="crud-fact-list" class="crud-fact-list"></div>
+            </div>
+
+            <!-- Knowledge Graph -->
+            <div class="card">
+                <h2><i class="fas fa-project-diagram"></i> Knowledge Graph</h2>
+                <input type="text" id="graph-search" placeholder="Search nodes..." style="margin-bottom: 10px;">
+                <div id="graph-container"></div>
+                <div id="graph-legend" class="legend"></div>
+            </div>
+        </div>
+
+        <!-- CRUD + Graph on bottom row stacked on mobile -->
+
+        <!-- Node Detail Modal -->
+        <div id="node-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="modal-title">Node Details</h3>
+                    <button class="modal-close" onclick="closeModal()">×</button>
+                </div>
+                <div id="modal-body"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== Utility Functions =====
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatSize(bytes) {
+            if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const unitIndex = Math.floor(Math.log(bytes) / Math.log(1024));
+            return (bytes / Math.pow(1024, unitIndex)).toFixed(2) + ' ' + units[unitIndex];
+        }
+
+        // ===== API Config =====
+        let API_BASE = window.location.origin;
+
+        // ===== Theme Management =====
+        let currentTheme = 'dark';
+        function setTheme(theme) {
+            currentTheme = theme;
+            document.body.setAttribute('data-theme', theme);
+            document.getElementById('theme-light').classList.toggle('active', theme === 'light');
+            document.getElementById('theme-dark').classList.toggle('active', theme === 'dark');
+        }
+
+        // ===== Health Check =====
+        async function checkHealth() {
+            const resultDiv = document.getElementById('health-result');
+            const statusCodeDiv = document.getElementById('status-code');
+            const embeddingsDiv = document.getElementById('embeddings-status');
+
+            try {
+                resultDiv.innerHTML = '<div class="loading">Checking health...</div>';
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+
+                statusCodeDiv.textContent = response.status;
+                resultDiv.innerHTML = `<div style="color: #6bff9f;">✓ Status: ${escapeHtml(data.status)}</div>`;
+                if (data.facts_count !== undefined) {
+                    document.getElementById('facts-count').textContent = data.facts_count;
+                }
+                if (data.embeddings) {
+                    document.getElementById('embeddings-status').textContent = data.embeddings;
+                    document.getElementById('embeddings-status-val').textContent = data.embeddings === 'active' ? 'active' : 'inactive';
+                }
+                if (data.port) {
+                    API_BASE = `http://localhost:${data.port}`;
+                    document.getElementById('port-status').textContent = data.port;
+                }
+                if (data.relationships !== undefined) {
+                    document.getElementById('relationships-count').textContent = data.relationships;
+                }
+            } catch (error) {
+                statusCodeDiv.textContent = 'Err';
+                resultDiv.innerHTML = `<div class="error">✗ Error: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        // ===== Fetch Functions =====
+        async function fetchFacts() {
+            const response = await fetch(`${API_BASE}/api/facts?project=debug-test-001`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            return data.facts || [];
+        }
+
+        async function fetchGraph() {
+            const response = await fetch(`${API_BASE}/api/graph?project=debug-test-001`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            return data.graph || { nodes: [], edges: [] };
+        }
+
+        async function fetchInsights() {
+            const response = await fetch(`${API_BASE}/api/graph/insights?project=debug-test-001`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            return data.insights || {};
+        }
+
+        // ===== Render Functions =====
+        const categoryColors = {
+            'preference': '#4F9CF9',
+            'tech-stack': '#6BFF9F',
+            'workflow': '#FF9F43',
+            'decision': '#EF4444',
+            'behavior': '#A78BFA',
+            'test': '#EC4899',
+            'evolution': '#FBBF24',
+            'architecture': '#3B82F6',
+            'benchmark': '#EC4899',
+            'general': '#9CA3AF'
+        };
+
+        function getCategoryColor(category) {
+            return categoryColors[category] || categoryColors['general'];
+        }
+
+        function renderFactsList(facts, searchTerm) {
+            const container = document.getElementById('facts-list');
+            if (!facts || facts.length === 0) {
+                container.innerHTML = '<div class="loading">No facts found</div>';
+                return;
+            }
+
+            const filtered = searchTerm
+                ? facts.filter(f =>
+                    (f.content && f.content.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                    (f.id && f.id.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                    (f.category && f.category.toLowerCase().includes(searchTerm.toLowerCase()))
+                )
+                : facts;
+
+            container.innerHTML = filtered.map(fact => `
+                <div class="fact-item" style="border-left-color: ${getCategoryColor(fact.category)}">
+                    <div class="fact-content">${escapeHtml(fact.content || '')}</div>
+                    <div class="fact-category">${escapeHtml(fact.category || 'general')}</div>
+                    <div style="font-size: 0.7rem; color: var(--color-text-secondary); margin-top: 4px;">
+                        ID: <span style="font-family: var(--font-mono);">${escapeHtml(fact.id || '')}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderInsightCategoryColor(category) {
+            const color = getCategoryColor(category);
+            return `<div style="display:inline-block;width:12px;height:12px;border-radius:4px;background:${color};margin-right:4px;"></div>`;
+        }
+
+        function renderInsights(insights) {
+            const container = document.getElementById('insights-list');
+            if (!insights || Object.keys(insights).length === 0) {
+                container.innerHTML = '<div class="loading">No insights available</div>';
+                return;
+            }
+
+            const items = [];
+            if (insights.total_facts !== undefined) {
+                items.push(`<div class="fact-item"><strong>Total Facts:</strong> ${insights.total_facts}</div>`);
+            }
+            if (insights.relationship_count !== undefined) {
+                items.push(`<div class="fact-item"><strong>Relationships:</strong> ${insights.relationship_count}</div>`);
+            }
+            if (insights.keyword_analysis) {
+                const kwEntries = Object.entries(insights.keyword_analysis).slice(0, 5)
+                    .map(([k, v]) => `<span style="background:${getCategoryColor('general')}20;padding:2px 6px;border-radius:4px;margin-right:4px;font-size:0.8rem;">${escapeHtml(k)} (${v})</span>`).join('');
+                items.push(`<div class="fact-item"><strong>Top Keywords:</strong><br>${kwEntries}</div>`);
+            }
+            if (insights.memory_patterns) {
+                items.push(`<div class="fact-item"><strong>Memory Patterns:</strong> ${insights.memory_patterns.join(', ')}</div>`);
+            }
+            if (insights.decision_keywords) {
+                items.push(`<div class="fact-item"><strong>Decision Keywords:</strong> ${insights.decision_keywords.join(', ')}</div>`);
+            }
+
+            container.innerHTML = items.join('') || '<div class="loading">No insights available</div>';
+        }
+
+        // ===== Graph Rendering =====
+        let currentGraphEdges = [];
+
+        function renderGraph(graphData) {
+            const container = document.getElementById('graph-container');
+            container.innerHTML = '';
+
+            if (!graphData.nodes || graphData.nodes.length === 0) {
+                container.innerHTML = '<div class="loading">No graph data available</div>';
+                return;
+            }
+
+            const width = container.clientWidth || 800;
+            const height = 500;
+
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', `0 0 ${width} ${height}`);
+
+            // Arrows
+            const defs = svg.append('defs');
+            defs.append('marker')
+                .attr('id', 'arrowhead')
+                .attr('viewBox', '-0 -5 10 10')
+                .attr('refX', 20)
+                .attr('refY', 0)
+                .attr('orient', 'auto')
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .html('<path d="M 0,-5 L 10,0 L 0,5" fill="#88c9d9"/>');
+
+            // Edges
+            const edges = graphData.edges || [];
+            const edgeGroup = svg.append('g').attr('class', 'edges');
+            edgeGroup.selectAll('line')
+                .data(edges)
+                .enter()
+                .append('line')
+                .attr('class', 'edge')
+                .attr('stroke', '#88c9d9')
+                .attr('stroke-width', 2)
+                .attr('stroke-opacity', 0.7)
+                .attr('marker-end', 'url(#arrowhead)');
+
+            // Simulation
+            const simulation = d3.forceSimulation(graphData.nodes)
+                .force('link', d3.forceLink(edges).id(d => d.id).distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2));
+
+            // Nodes
+            const nodeGroup = svg.append('g').attr('class', 'nodes');
+            const nodes = nodeGroup.selectAll('g')
+                .data(graphData.nodes)
+                .enter()
+                .append('g')
+                .attr('class', 'node');
+
+            nodes.append('circle')
+                .attr('r', d => (d.size || 20))
+                .attr('fill', d => getCategoryColor(d.category))
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 2)
+                .attr('cursor', 'pointer')
+                .attr('id', d => `node-${d.id}`);
+
+            nodes.append('text')
+                .attr('class', 'node-label')
+                .attr('text-anchor', 'middle')
+                .attr('dy', 4)
+                .attr('fill', '#fff')
+                .style('font-size', '10px')
+                .style('pointer-events', 'none')
+                .text(d => (d.label || d.id || 'Node').substring(0, 12));
+
+            // Click → modal
+            nodes.on('click', (event, d) => {
+                event.stopPropagation();
+                updateModal(d);
+            });
+
+            // Hover → highlight edges
+            nodes.on('mouseenter', function(event, d) {
+                const nodeId = d.id;
+                edgeGroup.selectAll('line').each(function(ed) {
+                    const connected = (ed.source.id || ed.source) === nodeId ||
+                                     (ed.target.id || ed.target) === nodeId;
+                    d3.select(this).classed('highlight', connected);
+                });
+            });
+            nodes.on('mouseleave', function() {
+                edgeGroup.selectAll('line').classed('highlight', false);
+            });
+
+            // Search highlight
+            const searchInput = document.getElementById('graph-search');
+            const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+            if (searchTerm) {
+                nodes.each(function(d) {
+                    const el = d3.select(this);
+                    const matches = (d.id || '').toLowerCase().includes(searchTerm) ||
+                        (d.label || '').toLowerCase().includes(searchTerm) ||
+                        (d.category || '').toLowerCase().includes(searchTerm);
+                    el.classed('highlight', matches);
+                });
+            }
+
+            // Tick
+            simulation.on('tick', () => {
+                nodes.attr('transform', d => `translate(${d.x},${d.y})`);
+                edgeGroup.selectAll('line')
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+            });
+
+            currentGraphEdges = edges;
+        }
+
+        function renderLegend(nodes) {
+            const legendDiv = document.getElementById('graph-legend');
+            const categories = new Set(nodes.map(n => n.category).filter(Boolean));
+
+            legendDiv.innerHTML = Array.from(categories).map(cat => {
+                const color = getCategoryColor(cat);
+                return `<div class="legend-item">
+                    <div class="legend-color" style="background: ${color}"></div>
+                    <span>${escapeHtml(cat)}</span>
+                </div>`;
+            }).join('');
+        }
+
+        // ===== Modal =====
+        function updateModal(node) {
+            document.getElementById('modal-title').textContent = node.id;
+            const fullContent = node.content || node.label || 'No content';
+            const category = node.category || 'N/A';
+            const size = (node.size || 0).toFixed(1);
+
+            const connectedEdges = currentGraphEdges.filter(e =>
+                (e.source && e.source.id === node.id) || e.source === node.id ||
+                (e.target && e.target.id === node.id) || e.target === node.id
+            );
+
+            let edgesHtml = '';
+            if (connectedEdges.length > 0) {
+                edgesHtml = connectedEdges.map(e => {
+                    const otherId = (e.source.id || e.source) === node.id
+                        ? (e.target.id || e.target) : (e.source.id || e.source);
+                    const edgeType = e.type || 'related';
+                    return `<div class="fact-item" style="margin-bottom:4px;">
+                        <span style="color:var(--color-text-secondary);font-size:0.75rem;">${escapeHtml(edgeType)}</span>
+                        <span style="color:var(--color-text-primary);font-size:0.85rem;"> → ${escapeHtml(otherId)}</span>
+                    </div>`;
+                }).join('');
+            } else {
+                edgesHtml = '<div style="color:var(--color-text-secondary);font-size:0.8rem;font-style:italic;">No direct connections</div>';
+            }
+
+            document.getElementById('modal-body').innerHTML = `
+                <strong>Full Content:</strong><br>
+                <div style="margin:8px 0;padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;border-left:3px solid ${getCategoryColor(category)}">${escapeHtml(fullContent)}</div><br>
+                <strong>Category:</strong> ${escapeHtml(category)}<br>
+                <strong>Size:</strong> ${size}
+                <br><br>
+                <strong>Connections (${connectedEdges.length}):</strong><br>
+                ${edgesHtml}
+            `;
+            document.getElementById('node-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('node-modal').style.display = 'none';
+        }
+
+        // ===== Refresh Functions =====
+        async function refreshFacts() {
+            const container = document.getElementById('facts-list');
+            container.innerHTML = '<div class="loading">Refreshing facts...</div>';
+            try {
+                const facts = await fetchFacts();
+                const searchTerm = document.getElementById('fact-search').value;
+                renderFactsList(facts, searchTerm);
+                renderCrudFactList(facts);
+            } catch (error) {
+                container.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function refreshInsights() {
+            const container = document.getElementById('insights-list');
+            container.innerHTML = '<div class="loading">Refreshing insights...</div>';
+            try {
+                const insights = await fetchInsights();
+                renderInsights(insights);
+            } catch (error) {
+                container.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function refreshGraph() {
+            const container = document.getElementById('graph-container');
+            container.innerHTML = '<div class="loading">Refreshing graph...</div>';
+            try {
+                const graphData = await fetchGraph();
+                renderGraph(graphData);
+                renderLegend(graphData.nodes || []);
+            } catch (error) {
+                container.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+
+        // ===== Search Handlers =====
+        document.getElementById('graph-search').addEventListener('input', function() {
+            refreshGraph();
+        });
+
+        document.getElementById('fact-search').addEventListener('input', function() {
+            fetchFacts().then(facts => {
+                renderFactsList(facts, this.value);
+            }).catch(err => {
+                console.error('Error:', err);
+            });
+        });
+
+        // ===== CRUD Functions =====
+        let editingFactId = null;
+
+        async function showNewFactForm() {
+            editingFactId = null;
+            document.getElementById('crud-form').style.display = 'block';
+            document.getElementById('crud-empty').style.display = 'none';
+            document.getElementById('crud-id').value = '';
+            document.getElementById('crud-content').value = '';
+            document.getElementById('crud-category').value = 'general';
+            document.getElementById('crud-save-btn').textContent = 'Create Fact';
+            document.getElementById('crud-status').textContent = '';
+        }
+
+        function cancelEdit() {
+            editingFactId = null;
+            document.getElementById('crud-form').style.display = 'none';
+            document.getElementById('crud-empty').style.display = 'block';
+            document.getElementById('crud-status').textContent = '';
+        }
+
+        async function saveFact() {
+            const statusDiv = document.getElementById('crud-status');
+            const id = document.getElementById('crud-id').value.trim();
+            const content = document.getElementById('crud-content').value.trim();
+            const category = document.getElementById('crud-category').value;
+
+            if (!id) { statusDiv.innerHTML = '<span style="color:var(--color-danger);">✗ Fact ID is required</span>'; return; }
+            if (!content) { statusDiv.innerHTML = '<span style="color:var(--color-danger);">✗ Content is required</span>'; return; }
+
+            statusDiv.innerHTML = '<span style="color:var(--color-text-secondary);">⏳ Saving...</span>';
+
+            const isUpdate = editingFactId !== null;
+            const payload = {
+                method: isUpdate ? 'PUT' : 'POST',
+                id: id,
+                content: content,
+                category: category,
+                timestamp: new Date().toISOString()
+            };
+            if (editingFactId) payload.id = editingFactId;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/facts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    statusDiv.innerHTML = `<span style="color:var(--color-success);">✓ ${isUpdate ? 'Updated' : 'Created'}: ${escapeHtml(id)}</span>`;
+                    cancelEdit();
+                    refreshFacts();
+                    refreshGraph();
+                } else {
+                    statusDiv.innerHTML = `<span style="color:var(--color-danger);">✗ ${escapeHtml(data.error || 'Unknown error')}</span>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color:var(--color-danger);">✗ Error: ${escapeHtml(error.message)}</span>`;
+            }
+        }
+
+        async function deleteFact(factId) {
+            if (!confirm(`Delete fact "${escapeHtml(factId)}"? This cannot be undone.`)) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/facts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ method: 'DELETE', id: factId })
+                });
+
+                if (response.ok) {
+                    refreshFacts();
+                    refreshGraph();
+                } else {
+                    const data = await response.json();
+                    alert('Delete failed: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function editFact(factId, content, category) {
+            editingFactId = factId;
+            document.getElementById('crud-form').style.display = 'block';
+            document.getElementById('crud-empty').style.display = 'none';
+            document.getElementById('crud-id').value = factId;
+            document.getElementById('crud-content').value = content;
+            document.getElementById('crud-category').value = category || 'general';
+            document.getElementById('crud-save-btn').textContent = 'Update Fact';
+            document.getElementById('crud-status').textContent = '';
+            document.getElementById('crud-content').focus();
+        }
+
+        function renderCrudFactList(facts) {
+            const container = document.getElementById('crud-fact-list');
+            if (!facts || facts.length === 0) {
+                container.innerHTML = '<div style="text-align:center;color:var(--color-text-secondary);padding:10px;">No facts to display</div>';
+                return;
+            }
+            container.innerHTML = facts.map(fact => `
+                <div class="crud-fact-item">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:0.85rem;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                            ${escapeHtml(fact.id)}
+                        </div>
+                        <div style="font-size:0.75rem;color:var(--color-text-secondary);">
+                            ${escapeHtml((fact.content || '').substring(0, 60))}${fact.content && fact.content.length > 60 ? '...' : ''}
+                        </div>
+                    </div>
+                    <div class="crud-actions">
+                        <button onclick="editFact('${escapeHtml(fact.id)}', '${escapeHtml(fact.content || '')}', '${escapeHtml(fact.category || 'general')}')">✎</button>
+                        <button onclick="deleteFact('${escapeHtml(fact.id)}')" style="color:var(--color-danger);">✕</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // ===== Init =====
+        async function init() {
+            await checkHealth();
+            await refreshFacts();
+            await refreshInsights();
+            await refreshGraph();
+
+            // Close modal on Escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeModal();
+            });
+
+            // Close modal on click outside
+            document.getElementById('node-modal').addEventListener('click', (e) => {
+                if (e.target === document.getElementById('node-modal')) closeModal();
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
