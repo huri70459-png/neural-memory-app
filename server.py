@@ -5,6 +5,7 @@ Project: debug-test-001
 Port: 8080
 """
 
+import atexit
 import json
 import sqlite3
 import os
@@ -13,6 +14,7 @@ import sys
 import math
 import time
 import base64
+import signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from datetime import datetime
@@ -190,8 +192,23 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         # Insert sample facts with project_tag
         for fact in SAMPLE_FACTS:
-            cursor.execute('''INSERT INTO facts (id, content, category, timestamp, project_tag)
-            VALUES (?, ?, ?, ?, ?)''', (fact['id'], fact['content'], fact['category'], fact['timestamp'], PROJECT_ID))
+            embedding = None
+            if EMBEDDINGS_AVAILABLE:
+                try:
+                    model = get_embedding_model()
+                    emb = model.encode(fact['content']).tolist()
+                    embedding = ','.join(str(x) for x in emb)
+                except Exception:
+                    pass
+            
+            if embedding:
+                cursor.execute('''INSERT INTO facts (id, content, category, timestamp, project_tag, embedding)
+                VALUES (?, ?, ?, ?, ?, ?)''',
+                (fact['id'], fact['content'], fact['category'], fact['timestamp'], PROJECT_ID, embedding))
+            else:
+                cursor.execute('''INSERT INTO facts (id, content, category, timestamp, project_tag)
+                VALUES (?, ?, ?, ?, ?)''',
+                (fact['id'], fact['content'], fact['category'], fact['timestamp'], PROJECT_ID))
         
         # Insert sample relationships
         for rel in SAMPLE_RELATIONSHIPS:
@@ -239,6 +256,9 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
             send_auth_required(self)
             return
 
+        parsed_url = urlparse(self.path)
+        post_path = parsed_url.path
+
         try:
             content_len = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_len).decode() if content_len > 0 else '{}'
@@ -247,6 +267,71 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
             self.send_json_response({'error': 'Invalid JSON'}, 400)
             return
         
+        # Route /api/facts/bulk before method dispatch
+        if post_path == '/api/facts/bulk':
+            new_facts = data.get('facts', [])
+            if not new_facts or not isinstance(new_facts, list):
+                self.send_json_response({'error': 'Array of facts required in "facts" field'}, 400)
+                return
+
+            c = sqlite3.connect(DB_PATH)
+            cur = c.cursor()
+            created = []
+            errors = []
+
+            for entry in new_facts:
+                if not isinstance(entry, dict):
+                    errors.append({'index': len(created), 'error': 'Each fact must be an object'})
+                    continue
+                fact_id = entry.get('id')
+                content = entry.get('content', '').strip()
+                category = entry.get('category', 'general')
+                timestamp = entry.get('timestamp', datetime.now().isoformat())
+                project_tag = entry.get('project_tag', PROJECT_ID)
+
+                if not fact_id:
+                    errors.append({'index': len(created), 'error': 'Fact ID is required'})
+                    continue
+                if not content:
+                    errors.append({'index': len(created), 'error': 'Content is required'})
+                    continue
+
+                # Generate embedding
+                embedding = None
+                if EMBEDDINGS_AVAILABLE and content:
+                    try:
+                        emb = get_embedding_model().encode(content).tolist()
+                        embedding = ','.join(str(x) for x in emb)
+                    except Exception:
+                        pass
+
+                try:
+                    if embedding:
+                        cur.execute(
+                            'INSERT INTO facts (id, content, category, timestamp, project_tag, embedding) VALUES (?, ?, ?, ?, ?, ?)',
+                            (fact_id, content, category, timestamp, project_tag, embedding)
+                        )
+                    else:
+                        cur.execute(
+                            'INSERT INTO facts (id, content, category, timestamp, project_tag) VALUES (?, ?, ?, ?, ?)',
+                            (fact_id, content, category, timestamp, project_tag)
+                        )
+                    created.append({'id': fact_id, 'content': content})
+                except sqlite3.IntegrityError:
+                    errors.append({'index': len(created), 'id': fact_id, 'error': 'Fact ID already exists'})
+
+            c.commit()
+            c.close()
+
+            self.send_json_response({
+                'success': True,
+                'created': len(created),
+                'errors': len(errors),
+                'results': created,
+                'message': f'Created {len(created)} facts, {len(errors)} errors'
+            }, 201)
+            return
+
         method = data.get('method', 'POST').upper()
         
         if method == 'POST':
@@ -326,6 +411,76 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
                 c.close()
                 self.send_json_response({'error': 'Fact not found'}, 404)
         
+        elif method == 'LINK':
+            # Create a relationship between two facts
+            source = data.get('source')
+            target = data.get('target')
+            rel_type = data.get('type', 'relates_to')
+            
+            if not source or not target:
+                self.send_json_response({'error': 'Source and target IDs required'}, 400)
+                return
+            
+            if source == target:
+                self.send_json_response({'error': 'Source and target must differ'}, 400)
+                return
+            
+            c = sqlite3.connect(DB_PATH)
+            cur = c.cursor()
+            # Verify both facts exist
+            cur.execute('SELECT id FROM facts WHERE id = ?', (source,))
+            if not cur.fetchone():
+                c.close()
+                self.send_json_response({'error': f'Source fact {source} not found'}, 404)
+                return
+            cur.execute('SELECT id FROM facts WHERE id = ?', (target,))
+            if not cur.fetchone():
+                c.close()
+                self.send_json_response({'error': f'Target fact {target} not found'}, 404)
+                return
+            
+            try:
+                cur.execute('INSERT INTO relationships (source, target, type) VALUES (?, ?, ?)',
+                           (source, target, rel_type))
+                c.commit()
+                c.close()
+                self.send_json_response({
+                    'success': True,
+                    'source': source,
+                    'target': target,
+                    'type': rel_type,
+                    'message': 'Relationship created'
+                }, 201)
+            except sqlite3.IntegrityError:
+                c.close()
+                self.send_json_response({'error': 'Relationship already exists'}, 409)
+        
+        elif method == 'UNLINK':
+            # Delete a relationship between two facts
+            source = data.get('source')
+            target = data.get('target')
+            
+            if not source or not target:
+                self.send_json_response({'error': 'Source and target IDs required'}, 400)
+                return
+            
+            c = sqlite3.connect(DB_PATH)
+            cur = c.cursor()
+            cur.execute('DELETE FROM relationships WHERE source = ? AND target = ?', (source, target))
+            rows_deleted = cur.rowcount
+            c.commit()
+            c.close()
+            
+            if rows_deleted > 0:
+                self.send_json_response({
+                    'success': True,
+                    'source': source,
+                    'target': target,
+                    'message': 'Relationship deleted'
+                })
+            else:
+                self.send_json_response({'error': 'Relationship not found'}, 404)
+        
         elif method == 'DELETE':
             # Delete fact
             fact_id = data.get('id')
@@ -365,8 +520,8 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         
         if path == '/':
-            # Serve index.html
-            index_path = os.path.join(os.path.dirname(__file__), 'index.html')
+            # Serve blueprint_v2.html (V2 UI)
+            index_path = os.path.join(os.path.dirname(__file__), 'blueprint_v2.html')
             if os.path.exists(index_path):
                 with open(index_path, 'r') as f:
                     self.send_html_response(f.read())
@@ -417,66 +572,143 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
             })
         
         elif path == '/api/facts':
-            # Get facts filtered by project
+            # Get facts filtered by project, or single fact by id
             project = query.get('project', [PROJECT_ID])[0]
+            fact_id = query.get('id', [None])[0]
             
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute(
-                'SELECT id, content, category, timestamp, project_tag FROM facts WHERE project_tag = ?',
-                (project,)
-            )
-            facts = [
-                {
-                    'id': row[0],
-                    'content': row[1],
-                    'category': row[2],
-                    'timestamp': row[3],
-                    'project_tag': row[4]
-                }
-                for row in cursor.fetchall()
-            ]
-            conn.close()
             
-            self.send_json_response({
-                'facts': facts,
-                'count': len(facts),
-                'project': project
-            })
+            if fact_id:
+                # Single fact lookup
+                cursor.execute(
+                    'SELECT id, content, category, timestamp, project_tag FROM facts WHERE id = ?',
+                    (fact_id,)
+                )
+                row = cursor.fetchone()
+                conn.close()
+                if row:
+                    self.send_json_response({
+                        'fact': {
+                            'id': row[0],
+                            'content': row[1],
+                            'category': row[2],
+                            'timestamp': row[3],
+                            'project_tag': row[4]
+                        }
+                    })
+                else:
+                    self.send_json_response({'error': 'Fact not found'}, 404)
+            else:
+                # List all facts for project
+                cursor.execute(
+                    'SELECT id, content, category, timestamp, project_tag FROM facts WHERE project_tag = ?',
+                    (project,)
+                )
+                facts = [
+                    {
+                        'id': row[0],
+                        'content': row[1],
+                        'category': row[2],
+                        'timestamp': row[3],
+                        'project_tag': row[4]
+                    }
+                    for row in cursor.fetchall()
+                ]
+                conn.close()
+                
+                self.send_json_response({
+                    'facts': facts,
+                    'count': len(facts),
+                    'project': project
+                })
         
         elif path == '/api/search':
-            # Search facts by keyword
+            # Search facts by keyword (default) or vector similarity (semantic=true)
             keyword = query.get('q', [''])[0]
             project = query.get('project', [PROJECT_ID])[0]
+            semantic = query.get('semantic', ['false'])[0].lower() in ('true', '1', 'yes')
             
             if not keyword:
-                self.send_json_response({'facts': [], 'count': 0, 'query': keyword})
+                self.send_json_response({'facts': [], 'count': 0, 'query': keyword, 'project': project, 'mode': 'keyword'})
                 return
             
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute(
-                'SELECT id, content, category, timestamp, project_tag FROM facts WHERE project_tag = ? AND content LIKE ?',
-                (project, f'%{keyword}%')
-            )
-            facts = [
-                {
-                    'id': row[0],
-                    'content': row[1],
-                    'category': row[2],
-                    'timestamp': row[3],
-                    'project_tag': row[4]
-                }
-                for row in cursor.fetchall()
-            ]
-            conn.close()
             
-            self.send_json_response({
-                'facts': facts,
-                'count': len(facts),
-                'query': keyword,
-                'project': project
-            })
+            if semantic and EMBEDDINGS_AVAILABLE:
+                # Semantic search: compute query embedding and find matches by cosine similarity
+                query_emb = get_embedding_model().encode(keyword).tolist()
+                
+                # Get all facts with embeddings for this project
+                cursor.execute(
+                    'SELECT id, content, category, timestamp, project_tag, embedding FROM facts WHERE project_tag = ? AND embedding IS NOT NULL',
+                    (project,)
+                )
+                rows = cursor.fetchall()
+                
+                scored_results = []
+                for row in rows:
+                    fact_id, content, category, timestamp, project_tag, emb_str = row
+                    if emb_str:
+                        try:
+                            fact_emb = [float(v) for v in emb_str.split(',')]
+                            similarity = cosine_similarity(query_emb, fact_emb)
+                            if similarity > 0.0:
+                                scored_results.append({
+                                    'id': fact_id,
+                                    'content': content,
+                                    'category': category,
+                                    'timestamp': timestamp,
+                                    'project_tag': project_tag,
+                                    'score': round(similarity, 4)
+                                })
+                        except (ValueError, IndexError):
+                            pass
+                
+                # Sort by similarity descending
+                scored_results.sort(key=lambda x: x['score'], reverse=True)
+                
+                # Return top results (same format as keyword search but with scores)
+                facts = [{'id': r['id'], 'content': r['content'], 'category': r['category'],
+                          'timestamp': r['timestamp'], 'project_tag': r['project_tag']}
+                         for r in scored_results]
+                
+                conn.close()
+                self.send_json_response({
+                    'facts': facts,
+                    'count': len(facts),
+                    'query': keyword,
+                    'project': project,
+                    'semantic': True,
+                    'mode': 'vector',
+                    'results': scored_results
+                })
+            else:
+                # Keyword search (original behavior)
+                cursor.execute(
+                    'SELECT id, content, category, timestamp, project_tag FROM facts WHERE project_tag = ? AND content LIKE ?',
+                    (project, f'%{keyword}%')
+                )
+                facts = [
+                    {
+                        'id': row[0],
+                        'content': row[1],
+                        'category': row[2],
+                        'timestamp': row[3],
+                        'project_tag': row[4]
+                    }
+                    for row in cursor.fetchall()
+                ]
+                conn.close()
+                
+                self.send_json_response({
+                    'facts': facts,
+                    'count': len(facts),
+                    'query': keyword,
+                    'project': project,
+                    'mode': 'keyword'
+                })
         
         elif path.startswith('/api/graph/insights'):
             # Get graph insights
@@ -535,9 +767,10 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
                 }
             })
         
-        elif path.startswith('/api/graph'):
+        elif path == '/api/graph' or path.startswith('/api/graph?'):
             # Get graph data
             project = query.get('project', [PROJECT_ID])[0]
+            edge_type_filter = query.get('edge_type', [None])[0]
             
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
@@ -549,14 +782,24 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
             )
             facts_rows = cursor.fetchall()
             
-            # Get relationships
-            cursor.execute('''
-                SELECT r.source, r.target, r.type, f1.content as source_content, f2.content as target_content
-                FROM relationships r
-                JOIN facts f1 ON r.source = f1.id
-                JOIN facts f2 ON r.target = f2.id
-                WHERE f1.project_tag = ? OR f2.project_tag = ?
-            ''', (project, project))
+            # Get relationships (optionally filtered by type)
+            if edge_type_filter:
+                cursor.execute('''
+                    SELECT r.source, r.target, r.type, f1.content as source_content, f2.content as target_content
+                    FROM relationships r
+                    JOIN facts f1 ON r.source = f1.id
+                    JOIN facts f2 ON r.target = f2.id
+                    WHERE (f1.project_tag = ? OR f2.project_tag = ?)
+                    AND r.type = ?
+                ''', (project, project, edge_type_filter))
+            else:
+                cursor.execute('''
+                    SELECT r.source, r.target, r.type, f1.content as source_content, f2.content as target_content
+                    FROM relationships r
+                    JOIN facts f1 ON r.source = f1.id
+                    JOIN facts f2 ON r.target = f2.id
+                    WHERE f1.project_tag = ? OR f2.project_tag = ?
+                ''', (project, project))
             rels_rows = cursor.fetchall()
             conn.close()
             
@@ -582,7 +825,7 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
                     'type': row[2]
                 })
             
-            self.send_json_response({
+            response_data = {
                 'graph': {
                     'nodes': nodes,
                     'edges': edges
@@ -590,6 +833,103 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
                 'node_count': len(nodes),
                 'edge_count': len(edges),
                 'project': project
+            }
+            if edge_type_filter:
+                response_data['edge_type'] = edge_type_filter
+            self.send_json_response(response_data)
+         
+        elif path.startswith('/api/graph/analytics'):
+            # Analytics dashboard endpoint — deeper stats
+            project = query.get('project', [PROJECT_ID])[0]
+            
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM facts WHERE project_tag = ?', (project,))
+            total_facts = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM relationships')
+            rel_count = cursor.fetchone()[0]
+            
+            # Facts by category
+            cursor.execute('SELECT category, COUNT(*) FROM facts WHERE project_tag = ? GROUP BY category', (project,))
+            facts_by_category = dict(cursor.fetchall())
+            
+            # Embedding coverage
+            cursor.execute('SELECT COUNT(*) FROM facts WHERE project_tag = ? AND embedding IS NOT NULL AND embedding != \"\"', (project,))
+            with_embedding = cursor.fetchone()[0]
+            embedding_coverage = (with_embedding / total_facts * 100) if total_facts > 0 else 0.0
+            
+            # Average relationships per fact
+            avg_rel = (rel_count / total_facts) if total_facts > 0 else 0.0
+            
+            # Top categories
+            top_categories = sorted(facts_by_category.items(), key=lambda x: x[1], reverse=True)
+            
+            # Date range
+            cursor.execute('SELECT MIN(timestamp), MAX(timestamp) FROM facts WHERE project_tag = ?', (project,))
+            date_range = cursor.fetchone()
+            
+            conn.close()
+            
+            self.send_json_response({
+                'analytics': {
+                    'total_facts': total_facts,
+                    'relationship_count': rel_count,
+                    'facts_by_category': facts_by_category,
+                    'embedding_coverage': round(embedding_coverage, 2),
+                    'avg_relationships_per_fact': round(avg_rel, 3),
+                    'top_categories': [{'category': c, 'count': n} for c, n in top_categories[:5]],
+                    'date_range': {'first': date_range[0] if date_range else None, 'last': date_range[1] if date_range else None}
+                }
+            })
+        
+        elif path.startswith('/api/graph/timeline'):
+            # Temporal memory view — facts ordered by timestamp with filtering
+            project = query.get('project', [PROJECT_ID])[0]
+            from_date = query.get('from_date', [None])[0]
+            to_date = query.get('to_date', [None])[0]
+            category_filter = query.get('category', [None])[0]
+            sort_order = query.get('sort', ['desc'])[0].lower()
+            
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            
+            sql = 'SELECT id, content, category, timestamp, project_tag FROM facts WHERE project_tag = ?'
+            params = [project]
+            
+            if from_date:
+                sql += ' AND timestamp >= ?'
+                params.append(from_date)
+            if to_date:
+                sql += ' AND timestamp <= ?'
+                params.append(to_date)
+            if category_filter:
+                sql += ' AND category = ?'
+                params.append(category_filter)
+            
+            order = 'DESC' if sort_order != 'asc' else 'ASC'
+            sql += f' ORDER BY timestamp {order}'
+            
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            conn.close()
+            
+            entries = [{
+                'id': row[0],
+                'content': row[1],
+                'category': row[2],
+                'timestamp': row[3],
+                'project_tag': row[4]
+            } for row in rows]
+            
+            self.send_json_response({
+                'timeline': {
+                    'total_facts': len(entries),
+                    'project': project,
+                    'sort': sort_order,
+                    'entries': entries
+                }
             })
         
         else:
@@ -607,6 +947,7 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     """Multi-threaded HTTP server for concurrent requests."""
     daemon_threads = True
+    allow_reuse_address = True  # fix TIME_WAIT port leak on restart
 
 
 def run_server(port=PORT):
@@ -627,10 +968,41 @@ def run_server(port=PORT):
     print(f'Relationships loaded: {len(SAMPLE_RELATIONSHIPS)}')
     
     try:
+        # Register clean shutdown for SIGINT/SIGTERM (Ctrl+C, taskkill, etc.)
+        def _shutdown(signum=None, frame=None):
+            print('\nShutting down server...')
+            server.shutdown()
+            # Force-close all threads
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+
+        # Also register atexit as a safety net
+        def _atexit_cleanup():
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+
+        atexit.register(_atexit_cleanup)
+
+        print(f'Server running at http://localhost:{port}')
+        print(f'Project: {PROJECT_ID}')
+        print(f'Database: {DB_PATH}')
+        print(f'Facts loaded: {len(SAMPLE_FACTS)}')
+        print(f'Relationships loaded: {len(SAMPLE_RELATIONSHIPS)}')
+        print(f'Press Ctrl+C to stop.\n')
+
         server.serve_forever()
     except KeyboardInterrupt:
         print('\nShutting down server...')
         server.shutdown()
+    finally:
+        try:
+            server.server_close()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

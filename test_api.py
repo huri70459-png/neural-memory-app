@@ -245,6 +245,138 @@ def T_search():
     return True
 
 
+def T_semantic_search():
+    print("\n--- Test 7b: SEMANTIC SEARCH ---")
+    # Semantic search should return results even when keyword doesn't match
+    # e.g. "neural memory system" should find facts about memory via embedding similarity
+    s, d = api("GET", "/api/search?q=neural+memory+system&project=debug-test-001&semantic=true")
+    check("semantic search -> 200", s == 200)
+    check("has results", "results" in d)
+    check("results is list", isinstance(d.get("results"), list))
+    # Should find at least 1 fact via embedding similarity
+    check("semantic finds results", d.get("count", 0) > 0)
+    if d.get("results"):
+        r = d["results"][0]
+        check("result has id", "id" in r)
+        check("result has content", "content" in r)
+        check("result has score", "score" in r)
+        check("score is float", isinstance(r.get("score"), (int, float)))
+        check("score > 0", r.get("score", 0) > 0)
+        check("score <= 1", r.get("score", 2) <= 1)
+    return True
+
+
+def T_relationships_crud():
+    print("\n--- Test 7c: RELATIONSHIP MANAGEMENT ---")
+    # Create a relationship via POST method LINK
+    source_id = f"link-src-{int(time.time() * 1000)}"
+    target_id = f"link-tgt-{int(time.time() * 1000)}"
+
+    # First create two test facts
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": source_id,
+        "content": "Source fact for relationship testing", "category": "test"
+    })
+    check("create source -> 201", s == 201)
+
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": target_id,
+        "content": "Target fact for relationship testing", "category": "test"
+    })
+    check("create target -> 201", s == 201)
+
+    # Now create a relationship via LINK method
+    s, d = api("POST", "/api/facts", {
+        "method": "LINK", "source": source_id, "target": target_id, "type": "relates_to"
+    })
+    check("link -> 201", s == 201)
+    check("link success", d.get("success") is True)
+
+    # Verify relationship appears in graph
+    s, d = api("GET", "/api/graph?project=debug-test-001")
+    check("graph -> 200", s == 200)
+    edges = d.get("graph", {}).get("edges", [])
+    link_edge = [e for e in edges if e.get("source") == source_id and e.get("target") == target_id]
+    check("link edge in graph", len(link_edge) == 1)
+
+    # Delete the source fact should cascade-delete the relationship
+    s, d = api("POST", "/api/facts", {
+        "method": "DELETE", "id": source_id
+    })
+    check("delete source -> 200", s == 200)
+
+    # Verify edge is gone after cascade
+    s, d = api("GET", "/api/graph?project=debug-test-001")
+    edges = d.get("graph", {}).get("edges", [])
+    link_edge = [e for e in edges if e.get("source") == source_id]
+    check("edge cascade-deleted", len(link_edge) == 0)
+
+    # Clean up target
+    api("POST", "/api/facts", {"method": "DELETE", "id": target_id})
+    return True
+
+
+def T_relationship_delete():
+    print("\n--- Test 7d: RELATIONSHIP DELETION ---")
+    ts = int(time.time() * 1000)
+    src = f"unlink-src-{ts}"
+    tgt = f"unlink-tgt-{ts}"
+
+    # Create two facts
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": src,
+        "content": "Source for unlink test", "category": "test",
+    })
+    check("create source -> 201", s == 201)
+
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": tgt,
+        "content": "Target for unlink test", "category": "test",
+    })
+    check("create target -> 201", s == 201)
+
+    # Create a relationship
+    s, d = api("POST", "/api/facts", {
+        "method": "LINK", "source": src,
+        "target": tgt, "type": "relates_to"
+    })
+    check("link -> 201", s == 201)
+
+    # Verify edge exists in graph
+    s, d = api("GET", "/api/graph?project=debug-test-001")
+    edges = d.get("graph", {}).get("edges", [])
+    check("edge exists in graph", any(e.get("source") == src for e in edges))
+
+    # Delete the relationship via UNLINK
+    s, d = api("POST", "/api/facts", {
+        "method": "UNLINK", "source": src, "target": tgt
+    })
+    check("unlink -> 200", s == 200)
+    check("unlink success", d.get("success") is True)
+
+    # Verify edge is gone from graph
+    s, d = api("GET", "/api/graph?project=debug-test-001")
+    edges = d.get("graph", {}).get("edges", [])
+    check("edge removed from graph", not any(e.get("source") == src for e in edges))
+
+    # Test unlink on non-existent relationship -> 404
+    s, d = api("POST", "/api/facts", {
+        "method": "UNLINK", "source": src, "target": tgt
+    })
+    check("unlink ghost -> 404", s == 404)
+
+    # Test unlink missing params -> 400
+    s, d = api("POST", "/api/facts", {
+        "method": "UNLINK", "source": src
+    })
+    check("unlink missing target -> 400", s == 400)
+
+    # Clean up
+    api("POST", "/api/facts", {"method": "DELETE", "id": src})
+    api("POST", "/api/facts", {"method": "DELETE", "id": tgt})
+    return True
+
+
 def T_graph():
     print("\n--- Test 8: GRAPH ---")
     s, d = api("GET", "/api/graph?project=debug-test-001")
@@ -342,6 +474,173 @@ def T_embedding_column():
     return True
 
 
+def T_bulk_import():
+    print("\n--- Test 14: BULK IMPORT ---")
+    ts = int(time.time() * 1000)
+    facts = [
+        {"id": f"bulk-{ts}-1", "content": "Bulk import fact one", "category": "test",
+         "project_tag": "debug-test-001"},
+        {"id": f"bulk-{ts}-2", "content": "Bulk import fact two", "category": "test",
+         "project_tag": "debug-test-001"},
+        {"id": f"bulk-{ts}-3", "content": "Bulk import fact three", "category": "test",
+         "project_tag": "debug-test-001"},
+    ]
+    s, d = api("POST", "/api/facts/bulk", {"facts": facts})
+    check("bulk -> 201", s == 201)
+    check("bulk success", d.get("success") is True)
+    check("bulk created count", d.get("created", 0) == 3)
+    check("bulk has results", "results" in d)
+    
+    # Verify facts exist
+    for f in facts:
+        s, d = api("GET", f"/api/facts?id={f['id']}")
+        check(f"bulk fact {f['id']} exists", s == 200)
+    
+    # Cleanup
+    for f in facts:
+        api("POST", "/api/facts", {"method": "DELETE", "id": f["id"]})
+    return True
+
+
+def T_edit_fact_put():
+    print("\n--- Test 14b: FACT EDITING (PUT) ---")
+    fid = f"edit-put-{int(time.time() * 1000)}"
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": fid,
+        "content": "Original content for edit test",
+        "category": "original",
+    })
+    check("create -> 201", s == 201)
+    
+    # PUT update via method=PUT
+    s, d = api("POST", "/api/facts", {
+        "method": "PUT", "id": fid,
+        "content": "Updated content via PUT",
+        "category": "updated",
+    })
+    check("PUT update -> 200", s == 200)
+    check("PUT success", d.get("success") is True)
+    
+    # Verify update
+    s, d = api("GET", f"/api/facts?id={fid}")
+    check("GET after PUT -> 200", s == 200)
+    fact = d.get("fact", {})
+    check("content updated", fact.get("content") == "Updated content via PUT")
+    check("category updated", fact.get("category") == "updated")
+    
+    # Clean up
+    api("POST", "/api/facts", {"method": "DELETE", "id": fid})
+    return True
+
+
+def T_graph_edge_type_filter():
+    print("\n--- Test 14c: GRAPH EDGE TYPE FILTER ---")
+    ts = int(time.time() * 1000)
+    src = f"edge-src-{ts}"
+    tgt = f"edge-tgt-{ts}"
+    
+    # Create two facts
+    api("POST", "/api/facts", {
+        "method": "POST", "id": src,
+        "content": "Source for edge filter test", "category": "test",
+    })
+    api("POST", "/api/facts", {
+        "method": "POST", "id": tgt,
+        "content": "Target for edge filter test", "category": "test",
+    })
+    
+    # Create a relationship of type "depends_on"
+    s, d = api("POST", "/api/facts", {
+        "method": "LINK", "source": src,
+        "target": tgt, "type": "depends_on"
+    })
+    check("link -> 201", s == 201)
+    
+    # Get full graph - should have the edge
+    s, d = api("GET", f"/api/graph?project=debug-test-001")
+    check("graph -> 200", s == 200)
+    all_edges = d.get("graph", {}).get("edges", [])
+    has_edge = any(e.get("source") == src and e.get("target") == tgt for e in all_edges)
+    check("edge in full graph", has_edge)
+    
+    # Filter by type
+    s, d = api("GET", f"/api/graph?project=debug-test-001&edge_type=depends_on")
+    check("filtered graph -> 200", s == 200)
+    filtered_edges = d.get("graph", {}).get("edges", [])
+    check("filtered has our edge", any(e.get("source") == src for e in filtered_edges))
+    check("filtered no non-matching types", 
+          all(e.get("type") == "depends_on" for e in filtered_edges))
+    
+    # Filter by different type - should exclude our edge
+    s, d = api("GET", f"/api/graph?project=debug-test-001&edge_type=relates_to")
+    check("other-type filter -> 200", s == 200)
+    other_edges = d.get("graph", {}).get("edges", [])
+    check("our edge excluded", 
+          not any(e.get("source") == src for e in other_edges))
+    
+    # Clean up
+    api("POST", "/api/facts", {"method": "DELETE", "id": src})
+    api("POST", "/api/facts", {"method": "DELETE", "id": tgt})
+    return True
+
+
+def T_analytics():
+    print("\n--- Test 15: ANALYTICS DASHBOARD ---")
+    s, d = api("GET", "/api/graph/analytics?project=debug-test-001")
+    check("analytics -> 200", s == 200)
+    a = d.get("analytics", {})
+    check("total_facts int", isinstance(a.get("total_facts"), int))
+    check("relationship_count int", isinstance(a.get("relationship_count"), int))
+    check("facts_by_category dict", isinstance(a.get("facts_by_category"), dict))
+    check("embedding_coverage float", isinstance(a.get("embedding_coverage"), (int, float)))
+    check("avg_relationships_per_fact float", isinstance(a.get("avg_relationships_per_fact"), (int, float)))
+    check("top_categories list", isinstance(a.get("top_categories"), list))
+    check("date_range present", "date_range" in a)
+    return True
+
+
+def T_timeline():
+    print("\n--- Test 16: TEMPORAL MEMORY VIEWS ---")
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001")
+    check("timeline -> 200", s == 200)
+    tl = d.get("timeline", {})
+    check("total_facts int", isinstance(tl.get("total_facts"), int))
+    check("entries list", isinstance(tl.get("entries"), list))
+    check("entries non-empty", len(tl.get("entries", [])) > 0)
+
+    entries = tl.get("entries", [])
+    if entries:
+        check("entry has id", "id" in entries[0])
+        check("entry has content", "content" in entries[0])
+        check("entry has category", "category" in entries[0])
+        check("entry has timestamp", "timestamp" in entries[0])
+
+    # Temporal filtering: from_date
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001&from_date=1970-01-01")
+    check("timeline from_date -> 200", s == 200)
+
+    # Temporal filtering: to_date
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001&to_date=2050-12-31")
+    check("timeline to_date -> 200", s == 200)
+
+    # Temporal filtering: category filter
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001&category=decision")
+    check("timeline category filter -> 200", s == 200)
+    filtered = d.get("timeline", {}).get("entries", [])
+    if filtered:
+        check("filtered entries are decision", all(
+            e.get("category") == "decision" for e in filtered
+        ))
+
+    # Temporal ordering: entries should be in descending timestamp order
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001&sort=desc")
+    check("timeline sort=desc -> 200", s == 200)
+    desc_entries = d.get("timeline", {}).get("entries", [])
+    check("desc has entries", len(desc_entries) > 0)
+
+    return True
+
+
 def run_all():
     global passed, failed, PORT, DB_PATH
     print("=" * 60)
@@ -381,12 +680,20 @@ def run_all():
         T_update()
         T_delete()
         T_search()
+        T_semantic_search()
+        T_relationships_crud()
+        T_relationship_delete()
         T_graph()
         T_insights()
         T_rate_limit()
         T_cors()
         T_errors()
         T_embedding_column()
+        T_bulk_import()
+        T_edit_fact_put()
+        T_graph_edge_type_filter()
+        T_analytics()
+        T_timeline()
     finally:
         proc.terminate()
         try:

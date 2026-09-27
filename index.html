@@ -344,11 +344,11 @@
             return (bytes / Math.pow(1024, unitIndex)).toFixed(2) + ' ' + units[unitIndex];
         }
         
-        // API base URL - will be updated from health check
-        let API_BASE = 'http://localhost:8082';
+        // API base URL - auto-detects current host:port so it never mismatches the server
+        let API_BASE = window.location.origin;
         
         // Update port status display
-        document.getElementById('port-status').textContent = '8082';
+        document.getElementById('port-status').textContent = window.location.port || '8080';
         
         // Check API health
         async function checkHealth() {
