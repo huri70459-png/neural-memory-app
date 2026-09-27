@@ -584,6 +584,63 @@ def T_graph_edge_type_filter():
     return True
 
 
+def T_analytics():
+    print("\n--- Test 15: ANALYTICS DASHBOARD ---")
+    s, d = api("GET", "/api/graph/analytics?project=debug-test-001")
+    check("analytics -> 200", s == 200)
+    a = d.get("analytics", {})
+    check("total_facts int", isinstance(a.get("total_facts"), int))
+    check("relationship_count int", isinstance(a.get("relationship_count"), int))
+    check("facts_by_category dict", isinstance(a.get("facts_by_category"), dict))
+    check("embedding_coverage float", isinstance(a.get("embedding_coverage"), (int, float)))
+    check("avg_relationships_per_fact float", isinstance(a.get("avg_relationships_per_fact"), (int, float)))
+    check("top_categories list", isinstance(a.get("top_categories"), list))
+    check("date_range present", "date_range" in a)
+    return True
+
+
+def T_timeline():
+    print("\n--- Test 16: TEMPORAL MEMORY VIEWS ---")
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001")
+    check("timeline -> 200", s == 200)
+    tl = d.get("timeline", {})
+    check("total_facts int", isinstance(tl.get("total_facts"), int))
+    check("entries list", isinstance(tl.get("entries"), list))
+    check("entries non-empty", len(tl.get("entries", [])) > 0)
+
+    entries = tl.get("entries", [])
+    if entries:
+        check("entry has id", "id" in entries[0])
+        check("entry has content", "content" in entries[0])
+        check("entry has category", "category" in entries[0])
+        check("entry has timestamp", "timestamp" in entries[0])
+
+    # Temporal filtering: from_date
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001&from_date=1970-01-01")
+    check("timeline from_date -> 200", s == 200)
+
+    # Temporal filtering: to_date
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001&to_date=2050-12-31")
+    check("timeline to_date -> 200", s == 200)
+
+    # Temporal filtering: category filter
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001&category=decision")
+    check("timeline category filter -> 200", s == 200)
+    filtered = d.get("timeline", {}).get("entries", [])
+    if filtered:
+        check("filtered entries are decision", all(
+            e.get("category") == "decision" for e in filtered
+        ))
+
+    # Temporal ordering: entries should be in descending timestamp order
+    s, d = api("GET", "/api/graph/timeline?project=debug-test-001&sort=desc")
+    check("timeline sort=desc -> 200", s == 200)
+    desc_entries = d.get("timeline", {}).get("entries", [])
+    check("desc has entries", len(desc_entries) > 0)
+
+    return True
+
+
 def run_all():
     global passed, failed, PORT, DB_PATH
     print("=" * 60)
@@ -635,6 +692,8 @@ def run_all():
         T_bulk_import()
         T_edit_fact_put()
         T_graph_edge_type_filter()
+        T_analytics()
+        T_timeline()
     finally:
         proc.terminate()
         try:

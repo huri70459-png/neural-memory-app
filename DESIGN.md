@@ -311,5 +311,5 @@ Fact form fields.
 ||------|----------|--------||
 || **Tier 1** | Semantic search (cosine similarity), relationship management (LINK/UNLINK API) | ✅ Complete |
 || **Tier 2** | Bulk import (POST /api/facts/bulk), single-fact GET (?id=), edge type filter (?edge_type=), dark/light theme toggle, graph edge type filter UI, relationship deletion in modal, bulk import UI | ✅ Complete |
-|| **Tier 3** | Fact editing UI integration (modal ✎ Edit button), drag-to-create relationships, multi-project support | 🚧 In Progress
-| **Tier 4** | Analytics dashboard, temporal memory views | 2 weeks |
+|| **Tier 3** | Fact editing UI integration (modal ✎ Edit button), drag-to-create relationships, multi-project support | ✅ Complete |
+| **Tier 4** | Analytics dashboard (`/api/graph/analytics`), temporal memory views (`/api/graph/timeline`) with category/date filtering | ✅ Complete |

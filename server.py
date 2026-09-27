@@ -837,6 +837,100 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
             if edge_type_filter:
                 response_data['edge_type'] = edge_type_filter
             self.send_json_response(response_data)
+         
+        elif path.startswith('/api/graph/analytics'):
+            # Analytics dashboard endpoint — deeper stats
+            project = query.get('project', [PROJECT_ID])[0]
+            
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM facts WHERE project_tag = ?', (project,))
+            total_facts = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM relationships')
+            rel_count = cursor.fetchone()[0]
+            
+            # Facts by category
+            cursor.execute('SELECT category, COUNT(*) FROM facts WHERE project_tag = ? GROUP BY category', (project,))
+            facts_by_category = dict(cursor.fetchall())
+            
+            # Embedding coverage
+            cursor.execute('SELECT COUNT(*) FROM facts WHERE project_tag = ? AND embedding IS NOT NULL AND embedding != \"\"', (project,))
+            with_embedding = cursor.fetchone()[0]
+            embedding_coverage = (with_embedding / total_facts * 100) if total_facts > 0 else 0.0
+            
+            # Average relationships per fact
+            avg_rel = (rel_count / total_facts) if total_facts > 0 else 0.0
+            
+            # Top categories
+            top_categories = sorted(facts_by_category.items(), key=lambda x: x[1], reverse=True)
+            
+            # Date range
+            cursor.execute('SELECT MIN(timestamp), MAX(timestamp) FROM facts WHERE project_tag = ?', (project,))
+            date_range = cursor.fetchone()
+            
+            conn.close()
+            
+            self.send_json_response({
+                'analytics': {
+                    'total_facts': total_facts,
+                    'relationship_count': rel_count,
+                    'facts_by_category': facts_by_category,
+                    'embedding_coverage': round(embedding_coverage, 2),
+                    'avg_relationships_per_fact': round(avg_rel, 3),
+                    'top_categories': [{'category': c, 'count': n} for c, n in top_categories[:5]],
+                    'date_range': {'first': date_range[0] if date_range else None, 'last': date_range[1] if date_range else None}
+                }
+            })
+        
+        elif path.startswith('/api/graph/timeline'):
+            # Temporal memory view — facts ordered by timestamp with filtering
+            project = query.get('project', [PROJECT_ID])[0]
+            from_date = query.get('from_date', [None])[0]
+            to_date = query.get('to_date', [None])[0]
+            category_filter = query.get('category', [None])[0]
+            sort_order = query.get('sort', ['desc'])[0].lower()
+            
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            
+            sql = 'SELECT id, content, category, timestamp, project_tag FROM facts WHERE project_tag = ?'
+            params = [project]
+            
+            if from_date:
+                sql += ' AND timestamp >= ?'
+                params.append(from_date)
+            if to_date:
+                sql += ' AND timestamp <= ?'
+                params.append(to_date)
+            if category_filter:
+                sql += ' AND category = ?'
+                params.append(category_filter)
+            
+            order = 'DESC' if sort_order != 'asc' else 'ASC'
+            sql += f' ORDER BY timestamp {order}'
+            
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            conn.close()
+            
+            entries = [{
+                'id': row[0],
+                'content': row[1],
+                'category': row[2],
+                'timestamp': row[3],
+                'project_tag': row[4]
+            } for row in rows]
+            
+            self.send_json_response({
+                'timeline': {
+                    'total_facts': len(entries),
+                    'project': project,
+                    'sort': sort_order,
+                    'entries': entries
+                }
+            })
         
         else:
             self.send_json_response({'error': 'Not found', 'path': path}, 404)
