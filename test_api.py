@@ -413,6 +413,116 @@ def T_embedding_column():
     return True
 
 
+def T_bulk_import():
+    print("\n--- Test 14: BULK IMPORT ---")
+    ts = int(time.time() * 1000)
+    facts = [
+        {"id": f"bulk-{ts}-1", "content": "Bulk import fact one", "category": "test",
+         "project_tag": "debug-test-001"},
+        {"id": f"bulk-{ts}-2", "content": "Bulk import fact two", "category": "test",
+         "project_tag": "debug-test-001"},
+        {"id": f"bulk-{ts}-3", "content": "Bulk import fact three", "category": "test",
+         "project_tag": "debug-test-001"},
+    ]
+    s, d = api("POST", "/api/facts/bulk", {"facts": facts})
+    check("bulk -> 201", s == 201)
+    check("bulk success", d.get("success") is True)
+    check("bulk created count", d.get("created", 0) == 3)
+    check("bulk has results", "results" in d)
+    
+    # Verify facts exist
+    for f in facts:
+        s, d = api("GET", f"/api/facts?id={f['id']}")
+        check(f"bulk fact {f['id']} exists", s == 200)
+    
+    # Cleanup
+    for f in facts:
+        api("POST", "/api/facts", {"method": "DELETE", "id": f["id"]})
+    return True
+
+
+def T_edit_fact_put():
+    print("\n--- Test 14b: FACT EDITING (PUT) ---")
+    fid = f"edit-put-{int(time.time() * 1000)}"
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": fid,
+        "content": "Original content for edit test",
+        "category": "original",
+    })
+    check("create -> 201", s == 201)
+    
+    # PUT update via method=PUT
+    s, d = api("POST", "/api/facts", {
+        "method": "PUT", "id": fid,
+        "content": "Updated content via PUT",
+        "category": "updated",
+    })
+    check("PUT update -> 200", s == 200)
+    check("PUT success", d.get("success") is True)
+    
+    # Verify update
+    s, d = api("GET", f"/api/facts?id={fid}")
+    check("GET after PUT -> 200", s == 200)
+    fact = d.get("fact", {})
+    check("content updated", fact.get("content") == "Updated content via PUT")
+    check("category updated", fact.get("category") == "updated")
+    
+    # Clean up
+    api("POST", "/api/facts", {"method": "DELETE", "id": fid})
+    return True
+
+
+def T_graph_edge_type_filter():
+    print("\n--- Test 14c: GRAPH EDGE TYPE FILTER ---")
+    ts = int(time.time() * 1000)
+    src = f"edge-src-{ts}"
+    tgt = f"edge-tgt-{ts}"
+    
+    # Create two facts
+    api("POST", "/api/facts", {
+        "method": "POST", "id": src,
+        "content": "Source for edge filter test", "category": "test",
+    })
+    api("POST", "/api/facts", {
+        "method": "POST", "id": tgt,
+        "content": "Target for edge filter test", "category": "test",
+    })
+    
+    # Create a relationship of type "depends_on"
+    s, d = api("POST", "/api/facts", {
+        "method": "LINK", "source": src,
+        "target": tgt, "type": "depends_on"
+    })
+    check("link -> 201", s == 201)
+    
+    # Get full graph - should have the edge
+    s, d = api("GET", f"/api/graph?project=debug-test-001")
+    check("graph -> 200", s == 200)
+    all_edges = d.get("graph", {}).get("edges", [])
+    has_edge = any(e.get("source") == src and e.get("target") == tgt for e in all_edges)
+    check("edge in full graph", has_edge)
+    
+    # Filter by type
+    s, d = api("GET", f"/api/graph?project=debug-test-001&edge_type=depends_on")
+    check("filtered graph -> 200", s == 200)
+    filtered_edges = d.get("graph", {}).get("edges", [])
+    check("filtered has our edge", any(e.get("source") == src for e in filtered_edges))
+    check("filtered no non-matching types", 
+          all(e.get("type") == "depends_on" for e in filtered_edges))
+    
+    # Filter by different type - should exclude our edge
+    s, d = api("GET", f"/api/graph?project=debug-test-001&edge_type=relates_to")
+    check("other-type filter -> 200", s == 200)
+    other_edges = d.get("graph", {}).get("edges", [])
+    check("our edge excluded", 
+          not any(e.get("source") == src for e in other_edges))
+    
+    # Clean up
+    api("POST", "/api/facts", {"method": "DELETE", "id": src})
+    api("POST", "/api/facts", {"method": "DELETE", "id": tgt})
+    return True
+
+
 def run_all():
     global passed, failed, PORT, DB_PATH
     print("=" * 60)
@@ -460,6 +570,9 @@ def run_all():
         T_cors()
         T_errors()
         T_embedding_column()
+        T_bulk_import()
+        T_edit_fact_put()
+        T_graph_edge_type_filter()
     finally:
         proc.terminate()
         try:
