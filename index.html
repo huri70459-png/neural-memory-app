@@ -188,6 +188,24 @@
             padding: 2px 4px;
             border-radius: 4px;
         }
+        .node.highlight circle {
+            stroke: #6bff9f !important;
+            stroke-width: 3px !important;
+            filter: drop-shadow(0 0 6px rgba(107, 255, 159, 0.6));
+        }
+        .node circle {
+            transition: stroke 0.2s, stroke-width 0.2s, filter 0.2s;
+        }
+        .node:hover circle {
+            stroke: #ffa502 !important;
+            stroke-width: 3px !important;
+            filter: drop-shadow(0 0 8px rgba(255, 165, 2, 0.5));
+        }
+        .edge.highlight {
+            stroke: #ffa502 !important;
+            stroke-width: 3px !important;
+            stroke-opacity: 1 !important;
+        }
     </style>
 </head>
 <body>
@@ -245,6 +263,52 @@
             </div>
         </div>
         
+        <!-- CRUD Form Card -->
+        <div class="card">
+            <h2><i class="fas fa-edit"></i> CRUD Fact Manager</h2>
+            <div id="crud-form" style="display: none;">
+                <div style="margin-bottom: 10px;">
+                    <input type="text" id="crud-id" placeholder="Fact ID (e.g. my-fact-001)" style="width: 100%; padding: 8px; margin-bottom: 8px; border-radius: 6px; border: none; background: rgba(255,255,255,0.15); color: #e0e0e0;">
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <textarea id="crud-content" rows="3" placeholder="Fact content..." style="width: 100%; padding: 8px; margin-bottom: 8px; border-radius: 6px; border: none; background: rgba(255,255,255,0.15); color: #e0e0e0; font-family: inherit;"></textarea>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <select id="crud-category" style="width: 100%; padding: 8px; border-radius: 6px; border: none; background: rgba(255,255,255,0.15); color: #e0e0e0;">
+                        <option value="general">General</option>
+                        <option value="preference">Preference</option>
+                        <option value="tech-stack">Tech Stack</option>
+                        <option value="workflow">Workflow</option>
+                        <option value="decision">Decision</option>
+                        <option value="behavior">Behavior</option>
+                        <option value="test">Test</option>
+                        <option value="evolution">Evolution</option>
+                        <option value="api-evolution">API Evolution</option>
+                        <option value="testing">Testing</option>
+                        <option value="performance">Performance</option>
+                        <option value="feedback">Feedback</option>
+                        <option value="graph">Graph</option>
+                        <option value="design">Design</option>
+                        <option value="architecture">Architecture</option>
+                        <option value="benchmark">Benchmark</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button id="crud-save-btn" onclick="saveFact()" style="flex: 1;">Create Fact</button>
+                    <button onclick="cancelEdit()" style="flex: 0 0 auto;">Cancel</button>
+                </div>
+                <div id="crud-status" style="margin-top: 8px; font-size: 0.85rem;"></div>
+            </div>
+            <div id="crud-empty" style="text-align: center; padding: 15px; color: #88c9d9;">
+                Click "New Fact" to create a memory. Select a fact from the list to edit or delete.
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                <button onclick="showNewFactForm()" style="flex: 1;"><i class="fas fa-plus"></i> New Fact</button>
+                <button onclick="refreshFacts()" style="flex: 0 0 auto;"><i class="fas fa-sync-alt"></i> Refresh</button>
+            </div>
+            <div id="crud-fact-list" style="margin-top: 12px; max-height: 200px; overflow-y: auto;"></div>
+        </div>
+        
         <div class="card">
             <h2><i class="fas fa-project-diagram"></i> Knowledge Graph</h2>
             <input type="text" id="graph-search" placeholder="Search nodes..." style="margin-bottom: 10px; padding: 8px; border-radius: 8px; border: none; background: rgba(255,255,255,0.1);">
@@ -280,8 +344,8 @@
             return (bytes / Math.pow(1024, unitIndex)).toFixed(2) + ' ' + units[unitIndex];
         }
         
-        // API base URL
-        const API_BASE = 'http://localhost:8082';
+        // API base URL - will be updated from health check
+        let API_BASE = 'http://localhost:8082';
         
         // Update port status display
         document.getElementById('port-status').textContent = '8082';
@@ -304,6 +368,11 @@
                 }
                 if (data.embeddings) {
                     embeddingsDiv.textContent = data.embeddings;
+                }
+                if (data.port) {
+                    const port = data.port;
+                    API_BASE = `http://localhost:${port}`;
+                    document.getElementById('port-status').textContent = port;
                 }
             } catch (error) {
                 statusCodeDiv.textContent = 'Err';
@@ -386,14 +455,44 @@
             }).join('');
         }
         
-        // Update node modal with details
+        // Store current graph edges for modal display
+        let currentGraphEdges = [];
+        
+        // Update node modal with details and connections
         function updateModal(node) {
             document.getElementById('modal-title').textContent = node.id;
+            const fullContent = node.content || node.label || 'No content';
+            const category = node.category || 'N/A';
+            const size = (node.size || 0).toFixed(1);
+            
+            // Find connected edges
+            const connectedEdges = currentGraphEdges.filter(e => 
+                (e.source && e.source.id === node.id) || e.source === node.id ||
+                (e.target && e.target.id === node.id) || e.target === node.id
+            );
+            
+            let edgesHtml = '';
+            if (connectedEdges.length > 0) {
+                edgesHtml = connectedEdges.map(e => {
+                    const otherId = (e.source.id || e.source) === node.id ? (e.target.id || e.target) : (e.source.id || e.source);
+                    const edgeType = e.type || 'related';
+                    return `<div class="fact-item" style="margin-bottom:4px;">
+                        <span style="color:#88c9d9;font-size:0.75rem;">${escapeHtml(edgeType)}</span>
+                        <span style="color:#e0e0e0;font-size:0.85rem;"> → ${escapeHtml(otherId)}</span>
+                    </div>`;
+                }).join('');
+            } else {
+                edgesHtml = '<div style="color:#88c9d9;font-size:0.8rem;font-style:italic;">No direct connections</div>';
+            }
+            
             document.getElementById('modal-body').innerHTML = `
-                <strong>Content:</strong><br>
-                <div style="margin: 8px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px;">${escapeHtml(node.label || node.content || 'No content')}</div><br>
-                <strong>Category:</strong> ${escapeHtml(node.category || 'N/A')}<br>
-                <strong>Size:</strong> ${(node.size || 0).toFixed(1)}
+                <strong>Full Content:</strong><br>
+                <div style="margin:8px 0;padding:10px;background:rgba(255,255,255,0.1);border-radius:8px;border-left:3px solid ${categoryColors[category] || '#4f9cf9'};">${escapeHtml(fullContent)}</div><br>
+                <strong>Category:</strong> ${escapeHtml(category)}<br>
+                <strong>Size:</strong> ${size}
+                <br><br>
+                <strong>Connections (${connectedEdges.length}):</strong><br>
+                ${edgesHtml}
             `;
             document.getElementById('node-modal').style.display = 'flex';
         }
@@ -529,18 +628,68 @@
                 updateModal(d);
             });
             
-            // Search highlighting
+            // Search highlighting on nodes and edges
             const searchInput = document.getElementById('graph-search');
-            const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+            const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
             
             if (searchTerm) {
-                nodes.select('circle').classed('highlight', d => 
-                    (d.id || '').toLowerCase().includes(searchTerm) ||
-                    (d.label || '').toLowerCase().includes(searchTerm) ||
-                    (d.content || '').toLowerCase().includes(searchTerm) ||
-                    (d.category || '').toLowerCase().includes(searchTerm)
-                );
+                // Highlight matching nodes
+                nodes.each(function(d) {
+                    const el = d3.select(this);
+                    const matches = (d.id || '').toLowerCase().includes(searchTerm) ||
+                        (d.label || '').toLowerCase().includes(searchTerm) ||
+                        (d.content || '').toLowerCase().includes(searchTerm) ||
+                        (d.category || '').toLowerCase().includes(searchTerm);
+                    el.classed('highlight', matches);
+                });
+                
+                // Highlight connected edges for matching nodes
+                const matchingIds = new Set();
+                graphData.nodes.forEach(d => {
+                    if ((d.id || '').toLowerCase().includes(searchTerm) ||
+                        (d.label || '').toLowerCase().includes(searchTerm) ||
+                        (d.content || '').toLowerCase().includes(searchTerm) ||
+                        (d.category || '').toLowerCase().includes(searchTerm)) {
+                        matchingIds.add(d.id);
+                    }
+                });
+                
+                edgeGroup.selectAll('line').each(function(d) {
+                    const edge = d3.select(this);
+                    const isConnected = matchingIds.has(d.source.id || d.source) || matchingIds.has(d.target.id || d.target);
+                    edge.classed('highlight', isConnected);
+                });
             }
+            
+            // Hover effect - highlight connected edges
+            nodes.on('mouseenter', function(event, d) {
+                const nodeId = d.id;
+                edgeGroup.selectAll('line').each(function(ed) {
+                    const connected = (ed.source.id || ed.source) === nodeId || 
+                                     (ed.target.id || ed.target) === nodeId;
+                    d3.select(this).classed('highlight', connected);
+                });
+            });
+            
+            nodes.on('mouseleave', function() {
+                edgeGroup.selectAll('line').classed('highlight', false);
+                // Re-apply search highlight if active
+                if (searchTerm) {
+                    const matchingIds = new Set();
+                    graphData.nodes.forEach(d => {
+                        if ((d.id || '').toLowerCase().includes(searchTerm) ||
+                            (d.label || '').toLowerCase().includes(searchTerm) ||
+                            (d.content || '').toLowerCase().includes(searchTerm) ||
+                            (d.category || '').toLowerCase().includes(searchTerm)) {
+                            matchingIds.add(d.id);
+                        }
+                    });
+                    edgeGroup.selectAll('line').each(function(d) {
+                        d3.select(this).classed('highlight', 
+                            matchingIds.has(d.source.id || d.source) || matchingIds.has(d.target.id || d.target));
+                    });
+                }
+            });
             
             // Update positions on tick
             simulation.on('tick', () => {
@@ -626,10 +775,156 @@
             try {
                 const graphData = await fetchGraph();
                 renderGraph(graphData);
+                renderLegend(graphData.nodes || []);
             } catch (error) {
                 container.innerHTML = `<div class="error">Error: ${error.message}</div>`;
             }
         }
+        
+        // ===== CRUD FORM FUNCTIONS =====
+        let editingFactId = null;
+        
+        async function showNewFactForm() {
+            editingFactId = null;
+            document.getElementById('crud-form').style.display = 'block';
+            document.getElementById('crud-empty').style.display = 'none';
+            document.getElementById('crud-id').value = '';
+            document.getElementById('crud-content').value = '';
+            document.getElementById('crud-category').value = 'general';
+            document.getElementById('crud-save-btn').textContent = 'Create Fact';
+            document.getElementById('crud-status').textContent = '';
+        }
+        
+        async function cancelEdit() {
+            editingFactId = null;
+            document.getElementById('crud-form').style.display = 'none';
+            document.getElementById('crud-empty').style.display = 'block';
+            document.getElementById('crud-status').textContent = '';
+        }
+        
+        async function saveFact() {
+            const statusDiv = document.getElementById('crud-status');
+            const id = document.getElementById('crud-id').value.trim();
+            const content = document.getElementById('crud-content').value.trim();
+            const category = document.getElementById('crud-category').value;
+            
+            if (!id) { statusDiv.innerHTML = '<span style="color:#ff6b6b;">✗ Fact ID is required</span>'; return; }
+            if (!content) { statusDiv.innerHTML = '<span style="color:#ff6b6b;">✗ Content is required</span>'; return; }
+            
+            statusDiv.innerHTML = '<span style="color:#88c9d9;">⏳ Saving...</span>';
+            
+            const isUpdate = editingFactId !== null;
+            const payload = {
+                method: isUpdate ? 'PUT' : 'POST',
+                id: id,
+                content: content,
+                category: category,
+                timestamp: new Date().toISOString()
+            };
+            if (editingFactId) payload.id = editingFactId;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/facts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = `<span style="color:#6bff9f;">✓ ${isUpdate ? 'Updated' : 'Created'}: ${escapeHtml(id)}</span>`;
+                    cancelEdit();
+                    refreshFacts();
+                    refreshGraph();
+                } else {
+                    statusDiv.innerHTML = `<span style="color:#ff6b6b;">✗ ${escapeHtml(data.error || 'Unknown error')}</span>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color:#ff6b6b;">✗ Error: ${escapeHtml(error.message)}</span>`;
+            }
+        }
+        
+        async function deleteFact(factId) {
+            if (!confirm(`Delete fact "${escapeHtml(factId)}"? This cannot be undone.`)) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/facts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ method: 'DELETE', id: factId })
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    refreshFacts();
+                    refreshGraph();
+                } else {
+                    alert('Delete failed: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        function editFact(factId, content, category) {
+            editingFactId = factId;
+            document.getElementById('crud-form').style.display = 'block';
+            document.getElementById('crud-empty').style.display = 'none';
+            document.getElementById('crud-id').value = factId;
+            document.getElementById('crud-content').value = content;
+            document.getElementById('crud-category').value = category || 'general';
+            document.getElementById('crud-save-btn').textContent = 'Update Fact';
+            document.getElementById('crud-status').textContent = '';
+            document.getElementById('crud-content').focus();
+        }
+        
+        // Render fact list for CRUD panel
+        function renderCrudFactList(facts) {
+            const container = document.getElementById('crud-fact-list');
+            if (!facts || facts.length === 0) {
+                container.innerHTML = '<div style="text-align:center;color:#88c9d9;padding:10px;">No facts to display</div>';
+                return;
+            }
+            container.innerHTML = facts.map(fact => `
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:rgba(255,255,255,0.05);border-radius:6px;margin-bottom:4px;">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:0.85rem;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(fact.id)}</div>
+                        <div style="font-size:0.75rem;color:#88c9d9;">${escapeHtml((fact.content || '').substring(0, 60))}${fact.content && fact.content.length > 60 ? '...' : ''}</div>
+                    </div>
+                    <div style="display:flex;gap:4px;flex-shrink:0;">
+                        <button onclick="editFact('${escapeHtml(fact.id)}', '${escapeHtml(fact.content || '')}', '${escapeHtml(fact.category || 'general')}')" style="padding:2px 6px;font-size:0.7rem;">✎</button>
+                        <button onclick="deleteFact('${escapeHtml(fact.id)}')" style="padding:2px 6px;font-size:0.7rem;color:#ff6b6b;">✕</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Refresh CRUD fact list
+        async function refreshCrudList() {
+            try {
+                const response = await fetch(`${API_BASE}/api/facts/all`);
+                const data = await response.json();
+                renderCrudFactList(data.facts || []);
+            } catch (error) {
+                console.error('Error refreshing CRUD list:', error);
+            }
+        }
+        
+        // Override refreshFacts to also update CRUD list
+        const _origRefreshFacts = refreshFacts;
+        refreshFacts = async function() {
+            const container = document.getElementById('facts-list');
+            container.innerHTML = '<div class="loading">Refreshing facts...</div>';
+            try {
+                const facts = await fetchFacts();
+                renderFactsList(facts);
+                refreshCrudList();
+            } catch (error) {
+                container.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        };
+        
+        // ===== END CRUD FORM FUNCTIONS =====
         
         // Initialize on page load
         async function init() {

@@ -12,7 +12,9 @@ import socket
 import sys
 import math
 import time
+import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 from typing import List, Dict, Tuple, Optional
@@ -22,11 +24,19 @@ try:
     from sentence_transformers import SentenceTransformer
     EMBEDDINGS_AVAILABLE = True
     MODEL_NAME = 'all-MiniLM-L6-v2'
-    EMBEDDING_MODEL = None
+    EMBEDDING_MODEL = None  # loaded lazily on first use
 except ImportError:
     EMBEDDINGS_AVAILABLE = False
     MODEL_NAME = None
     EMBEDDING_MODEL = None
+
+
+def get_embedding_model():
+    """Lazy-load the embedding model singleton."""
+    global EMBEDDING_MODEL
+    if EMBEDDING_MODEL is None and EMBEDDINGS_AVAILABLE:
+        EMBEDDING_MODEL = SentenceTransformer(MODEL_NAME)
+    return EMBEDDING_MODEL
 
 # Rate limiting
 from collections import defaultdict
@@ -66,6 +76,33 @@ def check_rate_limit(client_ip: str) -> bool:
     now = time.time()
     request_counts[client_ip] = [t for t in request_counts[client_ip] if now - t < WINDOW]
     return len(request_counts[client_ip]) < MAX_REQUESTS
+
+
+# Authentication — set env MEMORY_APP_AUTH="user:pass" to enable
+AUTH_CREDENTIALS = os.environ.get('MEMORY_APP_AUTH', '')
+
+
+def check_auth(handler):
+    """Check Basic Auth. Returns True if auth disabled or credentials match."""
+    if not AUTH_CREDENTIALS:
+        return True
+    auth_header = handler.headers.get('Authorization', '')
+    if not auth_header.startswith('Basic '):
+        return False
+    try:
+        decoded = base64.b64decode(auth_header[6:].encode()).decode('utf-8')
+        return decoded == AUTH_CREDENTIALS
+    except:
+        return False
+
+
+def send_auth_required(handler):
+    """Send 401 Unauthorized with WWW-Authenticate header."""
+    handler.send_response(401)
+    handler.send_header('WWW-Authenticate', 'Basic realm="Neural Memory App"')
+    handler.send_header('Content-Type', 'application/json')
+    handler.end_headers()
+    handler.wfile.write(json.dumps({'error': 'Authentication required'}).encode())
 
 # Database configuration
 DB_PATH = 'C:/Users/kafsh/neural-memory-app-debug-test-001/data/memories.db'
@@ -198,7 +235,10 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
         if not check_rate_limit(client_ip):
             self.send_json_response({'error': 'Rate limit exceeded'}, 429)
             return
-        
+        if not check_auth(self):
+            send_auth_required(self)
+            return
+
         try:
             content_len = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_len).decode() if content_len > 0 else '{}'
@@ -212,16 +252,23 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
         if method == 'POST':
             # Create new fact
             fact_id = data.get('id')
-            content = data.get('content', '')
+            content = data.get('content', '').strip()
             category = data.get('category', 'general')
             timestamp = data.get('timestamp', datetime.now().isoformat())
             project_tag = data.get('project_tag', PROJECT_ID)
-            
+
+            if not fact_id:
+                self.send_json_response({'error': 'Fact ID is required'}, 400)
+                return
+            if not content:
+                self.send_json_response({'error': 'Content is required'}, 400)
+                return
+
             # Generate embedding if available
             embedding = None
             if EMBEDDINGS_AVAILABLE and content:
                 try:
-                    model = SentenceTransformer(MODEL_NAME)
+                    model = get_embedding_model()
                     emb = model.encode(content).tolist()
                     embedding = ','.join(str(x) for x in emb)
                 except:
@@ -289,8 +336,9 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
             c = sqlite3.connect(DB_PATH)
             cur = c.cursor()
             cur.execute('DELETE FROM facts WHERE id = ?', (fact_id,))
+            facts_deleted = cur.rowcount
             cur.execute('DELETE FROM relationships WHERE source = ? OR target = ?', (fact_id, fact_id))
-            if cur.rowcount > 0:
+            if facts_deleted > 0:
                 c.commit()
                 c.close()
                 self.send_json_response({'success': True, 'id': fact_id, 'message': 'Fact deleted'})
@@ -308,7 +356,10 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
         if not check_rate_limit(client_ip):
             self.send_json_response({'error': 'Rate limit exceeded', 'limit': MAX_REQUESTS, 'window': WINDOW}, 429)
             return
-        
+        if not check_auth(self):
+            send_auth_required(self)
+            return
+
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -553,10 +604,22 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """Multi-threaded HTTP server for concurrent requests."""
+    daemon_threads = True
+
+
 def run_server(port=PORT):
     """Run the HTTP server."""
     init_db()
-    server = HTTPServer(('0.0.0.0', port), MemoryAppHandler)
+    # Warm up embedding model on startup so first request is fast
+    if EMBEDDINGS_AVAILABLE:
+        try:
+            get_embedding_model()
+            print(f"Embeddings model loaded: {MODEL_NAME}")
+        except Exception as e:
+            print(f"Warning: embeddings model warmup failed: {e}")
+    server = ThreadingHTTPServer(('0.0.0.0', port), MemoryAppHandler)
     print(f'Server running at http://localhost:{port}')
     print(f'Project: {PROJECT_ID}')
     print(f'Database: {DB_PATH}')
