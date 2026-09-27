@@ -245,6 +245,77 @@ def T_search():
     return True
 
 
+def T_semantic_search():
+    print("\n--- Test 7b: SEMANTIC SEARCH ---")
+    # Semantic search should return results even when keyword doesn't match
+    # e.g. "neural memory system" should find facts about memory via embedding similarity
+    s, d = api("GET", "/api/search?q=neural+memory+system&project=debug-test-001&semantic=true")
+    check("semantic search -> 200", s == 200)
+    check("has results", "results" in d)
+    check("results is list", isinstance(d.get("results"), list))
+    # Should find at least 1 fact via embedding similarity
+    check("semantic finds results", d.get("count", 0) > 0)
+    if d.get("results"):
+        r = d["results"][0]
+        check("result has id", "id" in r)
+        check("result has content", "content" in r)
+        check("result has score", "score" in r)
+        check("score is float", isinstance(r.get("score"), (int, float)))
+        check("score > 0", r.get("score", 0) > 0)
+        check("score <= 1", r.get("score", 2) <= 1)
+    return True
+
+
+def T_relationships_crud():
+    print("\n--- Test 7c: RELATIONSHIP MANAGEMENT ---")
+    # Create a relationship via POST method LINK
+    source_id = f"link-src-{int(time.time() * 1000)}"
+    target_id = f"link-tgt-{int(time.time() * 1000)}"
+
+    # First create two test facts
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": source_id,
+        "content": "Source fact for relationship testing", "category": "test"
+    })
+    check("create source -> 201", s == 201)
+
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": target_id,
+        "content": "Target fact for relationship testing", "category": "test"
+    })
+    check("create target -> 201", s == 201)
+
+    # Now create a relationship via LINK method
+    s, d = api("POST", "/api/facts", {
+        "method": "LINK", "source": source_id, "target": target_id, "type": "relates_to"
+    })
+    check("link -> 201", s == 201)
+    check("link success", d.get("success") is True)
+
+    # Verify relationship appears in graph
+    s, d = api("GET", "/api/graph?project=debug-test-001")
+    check("graph -> 200", s == 200)
+    edges = d.get("graph", {}).get("edges", [])
+    link_edge = [e for e in edges if e.get("source") == source_id and e.get("target") == target_id]
+    check("link edge in graph", len(link_edge) == 1)
+
+    # Delete the source fact should cascade-delete the relationship
+    s, d = api("POST", "/api/facts", {
+        "method": "DELETE", "id": source_id
+    })
+    check("delete source -> 200", s == 200)
+
+    # Verify edge is gone after cascade
+    s, d = api("GET", "/api/graph?project=debug-test-001")
+    edges = d.get("graph", {}).get("edges", [])
+    link_edge = [e for e in edges if e.get("source") == source_id]
+    check("edge cascade-deleted", len(link_edge) == 0)
+
+    # Clean up target
+    api("POST", "/api/facts", {"method": "DELETE", "id": target_id})
+    return True
+
+
 def T_graph():
     print("\n--- Test 8: GRAPH ---")
     s, d = api("GET", "/api/graph?project=debug-test-001")
@@ -381,6 +452,8 @@ def run_all():
         T_update()
         T_delete()
         T_search()
+        T_semantic_search()
+        T_relationships_crud()
         T_graph()
         T_insights()
         T_rate_limit()

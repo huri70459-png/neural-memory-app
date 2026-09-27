@@ -192,8 +192,23 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         # Insert sample facts with project_tag
         for fact in SAMPLE_FACTS:
-            cursor.execute('''INSERT INTO facts (id, content, category, timestamp, project_tag)
-            VALUES (?, ?, ?, ?, ?)''', (fact['id'], fact['content'], fact['category'], fact['timestamp'], PROJECT_ID))
+            embedding = None
+            if EMBEDDINGS_AVAILABLE:
+                try:
+                    model = get_embedding_model()
+                    emb = model.encode(fact['content']).tolist()
+                    embedding = ','.join(str(x) for x in emb)
+                except Exception:
+                    pass
+            
+            if embedding:
+                cursor.execute('''INSERT INTO facts (id, content, category, timestamp, project_tag, embedding)
+                VALUES (?, ?, ?, ?, ?, ?)''',
+                (fact['id'], fact['content'], fact['category'], fact['timestamp'], PROJECT_ID, embedding))
+            else:
+                cursor.execute('''INSERT INTO facts (id, content, category, timestamp, project_tag)
+                VALUES (?, ?, ?, ?, ?)''',
+                (fact['id'], fact['content'], fact['category'], fact['timestamp'], PROJECT_ID))
         
         # Insert sample relationships
         for rel in SAMPLE_RELATIONSHIPS:
@@ -328,6 +343,50 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
                 c.close()
                 self.send_json_response({'error': 'Fact not found'}, 404)
         
+        elif method == 'LINK':
+            # Create a relationship between two facts
+            source = data.get('source')
+            target = data.get('target')
+            rel_type = data.get('type', 'relates_to')
+            
+            if not source or not target:
+                self.send_json_response({'error': 'Source and target IDs required'}, 400)
+                return
+            
+            if source == target:
+                self.send_json_response({'error': 'Source and target must differ'}, 400)
+                return
+            
+            c = sqlite3.connect(DB_PATH)
+            cur = c.cursor()
+            # Verify both facts exist
+            cur.execute('SELECT id FROM facts WHERE id = ?', (source,))
+            if not cur.fetchone():
+                c.close()
+                self.send_json_response({'error': f'Source fact {source} not found'}, 404)
+                return
+            cur.execute('SELECT id FROM facts WHERE id = ?', (target,))
+            if not cur.fetchone():
+                c.close()
+                self.send_json_response({'error': f'Target fact {target} not found'}, 404)
+                return
+            
+            try:
+                cur.execute('INSERT INTO relationships (source, target, type) VALUES (?, ?, ?)',
+                           (source, target, rel_type))
+                c.commit()
+                c.close()
+                self.send_json_response({
+                    'success': True,
+                    'source': source,
+                    'target': target,
+                    'type': rel_type,
+                    'message': 'Relationship created'
+                }, 201)
+            except sqlite3.IntegrityError:
+                c.close()
+                self.send_json_response({'error': 'Relationship already exists'}, 409)
+        
         elif method == 'DELETE':
             # Delete fact
             fact_id = data.get('id')
@@ -447,38 +506,91 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
             })
         
         elif path == '/api/search':
-            # Search facts by keyword
+            # Search facts by keyword (default) or vector similarity (semantic=true)
             keyword = query.get('q', [''])[0]
             project = query.get('project', [PROJECT_ID])[0]
+            semantic = query.get('semantic', ['false'])[0].lower() in ('true', '1', 'yes')
             
             if not keyword:
-                self.send_json_response({'facts': [], 'count': 0, 'query': keyword})
+                self.send_json_response({'facts': [], 'count': 0, 'query': keyword, 'project': project, 'mode': 'keyword'})
                 return
             
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute(
-                'SELECT id, content, category, timestamp, project_tag FROM facts WHERE project_tag = ? AND content LIKE ?',
-                (project, f'%{keyword}%')
-            )
-            facts = [
-                {
-                    'id': row[0],
-                    'content': row[1],
-                    'category': row[2],
-                    'timestamp': row[3],
-                    'project_tag': row[4]
-                }
-                for row in cursor.fetchall()
-            ]
-            conn.close()
             
-            self.send_json_response({
-                'facts': facts,
-                'count': len(facts),
-                'query': keyword,
-                'project': project
-            })
+            if semantic and EMBEDDINGS_AVAILABLE:
+                # Semantic search: compute query embedding and find matches by cosine similarity
+                query_emb = get_embedding_model().encode(keyword).tolist()
+                
+                # Get all facts with embeddings for this project
+                cursor.execute(
+                    'SELECT id, content, category, timestamp, project_tag, embedding FROM facts WHERE project_tag = ? AND embedding IS NOT NULL',
+                    (project,)
+                )
+                rows = cursor.fetchall()
+                
+                scored_results = []
+                for row in rows:
+                    fact_id, content, category, timestamp, project_tag, emb_str = row
+                    if emb_str:
+                        try:
+                            fact_emb = [float(v) for v in emb_str.split(',')]
+                            similarity = cosine_similarity(query_emb, fact_emb)
+                            if similarity > 0.0:
+                                scored_results.append({
+                                    'id': fact_id,
+                                    'content': content,
+                                    'category': category,
+                                    'timestamp': timestamp,
+                                    'project_tag': project_tag,
+                                    'score': round(similarity, 4)
+                                })
+                        except (ValueError, IndexError):
+                            pass
+                
+                # Sort by similarity descending
+                scored_results.sort(key=lambda x: x['score'], reverse=True)
+                
+                # Return top results (same format as keyword search but with scores)
+                facts = [{'id': r['id'], 'content': r['content'], 'category': r['category'],
+                          'timestamp': r['timestamp'], 'project_tag': r['project_tag']}
+                         for r in scored_results]
+                
+                conn.close()
+                self.send_json_response({
+                    'facts': facts,
+                    'count': len(facts),
+                    'query': keyword,
+                    'project': project,
+                    'semantic': True,
+                    'mode': 'vector',
+                    'results': scored_results
+                })
+            else:
+                # Keyword search (original behavior)
+                cursor.execute(
+                    'SELECT id, content, category, timestamp, project_tag FROM facts WHERE project_tag = ? AND content LIKE ?',
+                    (project, f'%{keyword}%')
+                )
+                facts = [
+                    {
+                        'id': row[0],
+                        'content': row[1],
+                        'category': row[2],
+                        'timestamp': row[3],
+                        'project_tag': row[4]
+                    }
+                    for row in cursor.fetchall()
+                ]
+                conn.close()
+                
+                self.send_json_response({
+                    'facts': facts,
+                    'count': len(facts),
+                    'query': keyword,
+                    'project': project,
+                    'mode': 'keyword'
+                })
         
         elif path.startswith('/api/graph/insights'):
             # Get graph insights
