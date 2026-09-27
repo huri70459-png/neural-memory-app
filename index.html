@@ -130,6 +130,64 @@
             font-size: 0.8rem;
             margin-top: 5px;
         }
+        .legend {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 10px 15px;
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            max-width: 500px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: #ff6b6b;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        .highlight {
+            background: rgba(79, 156, 249, 0.4);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -189,7 +247,20 @@
         
         <div class="card">
             <h2><i class="fas fa-project-diagram"></i> Knowledge Graph</h2>
+            <input type="text" id="graph-search" placeholder="Search nodes..." style="margin-bottom: 10px; padding: 8px; border-radius: 8px; border: none; background: rgba(255,255,255,0.1);">
             <div id="graph-container"></div>
+            <div id="graph-legend" class="legend"></div>
+        </div>
+        
+        <!-- Node Detail Modal -->
+        <div id="node-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="modal-title">Node Details</h3>
+                    <button class="modal-close" onclick="closeModal()">×</button>
+                </div>
+                <div id="modal-body"></div>
+            </div>
         </div>
     </div>
 
@@ -296,6 +367,37 @@
             `).join('');
         }
         
+        // Close modal
+        function closeModal() {
+            document.getElementById('node-modal').style.display = 'none';
+        }
+        
+        // Render legend
+        function renderLegend(nodes) {
+            const legendDiv = document.getElementById('graph-legend');
+            const categories = new Set(nodes.map(n => n.category).filter(Boolean));
+            const colors = ['#4f9cf9', '#6bff9f', '#ff6b6b', '#ffa502', '#a29bfe'];
+            let i = 0;
+            
+            legendDiv.innerHTML = Array.from(categories).map(cat => {
+                const color = colors[i % colors.length];
+                i++;
+                return `<div class="legend-item"><div class="legend-color" style="background: ${color}"></div><span>${escapeHtml(cat)}</span></div>`;
+            }).join('');
+        }
+        
+        // Update node modal with details
+        function updateModal(node) {
+            document.getElementById('modal-title').textContent = node.id;
+            document.getElementById('modal-body').innerHTML = `
+                <strong>Content:</strong><br>
+                <div style="margin: 8px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px;">${escapeHtml(node.label || node.content || 'No content')}</div><br>
+                <strong>Category:</strong> ${escapeHtml(node.category || 'N/A')}<br>
+                <strong>Size:</strong> ${(node.size || 0).toFixed(1)}
+            `;
+            document.getElementById('node-modal').style.display = 'flex';
+        }
+        
         // Render graph visualization using D3
         function renderGraph(graphData) {
             const container = document.getElementById('graph-container');
@@ -310,6 +412,31 @@
             
             const width = container.clientWidth || 800;
             const height = 500;
+            
+            // Category colors
+            const categoryColors = {
+                'preference': '#4f9cf9',
+                'tech-stack': '#6bff9f',
+                'workflow': '#ffa502',
+                'decision': '#ff6b6b',
+                'behavior': '#a29bfe',
+                'test': '#ff9ff3',
+                'evolution': '#feca57',
+                'api-evolution': '#48dbfb',
+                'testing': '#1dd1a1',
+                'performance': '#5f27cd',
+                'feedback': '#e94560',
+                'next-step': '#00b894',
+                'graph': '#00aec4',
+                'design': '#ff4757',
+                'algorithm': '#2270b3',
+                'provenance': '#ff6b6b',
+                'data-integrity': '#ff8c42',
+                'architecture': '#54a0ff',
+                'optimization': '#55efc4',
+                'automation': '#ffeaa7',
+                'benchmark': '#fd79a8'
+            };
             
             // Create SVG
             const svg = d3.select(container)
@@ -381,10 +508,11 @@
             
             nodes.append('circle')
                 .attr('r', d => (d.size || 20))
-                .attr('fill', 'url(#node-gradient)')
+                .attr('fill', d => categoryColors[d.category] || '#4f9cf9')
                 .attr('stroke', '#fff')
                 .attr('stroke-width', 2)
-                .attr('cursor', 'pointer');
+                .attr('cursor', 'pointer')
+                .attr('id', d => `node-${d.id}`);
             
             nodes.append('text')
                 .attr('class', 'node-label')
@@ -395,10 +523,24 @@
                 .style('pointer-events', 'none')
                 .text(d => d.label || d.id || 'Node');
             
-            // Add click interactions
+            // Add click interactions with modal
             nodes.on('click', (event, d) => {
-                console.log('Node clicked:', d);
+                event.stopPropagation();
+                updateModal(d);
             });
+            
+            // Search highlighting
+            const searchInput = document.getElementById('graph-search');
+            const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+            
+            if (searchTerm) {
+                nodes.select('circle').classed('highlight', d => 
+                    (d.id || '').toLowerCase().includes(searchTerm) ||
+                    (d.label || '').toLowerCase().includes(searchTerm) ||
+                    (d.content || '').toLowerCase().includes(searchTerm) ||
+                    (d.category || '').toLowerCase().includes(searchTerm)
+                );
+            }
             
             // Update positions on tick
             simulation.on('tick', () => {
@@ -410,6 +552,11 @@
                     .attr('y2', d => d.target.y);
             });
         }
+        
+        // Search input handler
+        document.getElementById('graph-search').addEventListener('input', function() {
+            refreshGraph();
+        });
         
         // Render insights
         function renderInsights(insights) {
