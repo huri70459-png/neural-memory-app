@@ -316,6 +316,67 @@ def T_relationships_crud():
     return True
 
 
+def T_relationship_delete():
+    print("\n--- Test 7d: RELATIONSHIP DELETION ---")
+    ts = int(time.time() * 1000)
+    src = f"unlink-src-{ts}"
+    tgt = f"unlink-tgt-{ts}"
+
+    # Create two facts
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": src,
+        "content": "Source for unlink test", "category": "test",
+    })
+    check("create source -> 201", s == 201)
+
+    s, d = api("POST", "/api/facts", {
+        "method": "POST", "id": tgt,
+        "content": "Target for unlink test", "category": "test",
+    })
+    check("create target -> 201", s == 201)
+
+    # Create a relationship
+    s, d = api("POST", "/api/facts", {
+        "method": "LINK", "source": src,
+        "target": tgt, "type": "relates_to"
+    })
+    check("link -> 201", s == 201)
+
+    # Verify edge exists in graph
+    s, d = api("GET", "/api/graph?project=debug-test-001")
+    edges = d.get("graph", {}).get("edges", [])
+    check("edge exists in graph", any(e.get("source") == src for e in edges))
+
+    # Delete the relationship via UNLINK
+    s, d = api("POST", "/api/facts", {
+        "method": "UNLINK", "source": src, "target": tgt
+    })
+    check("unlink -> 200", s == 200)
+    check("unlink success", d.get("success") is True)
+
+    # Verify edge is gone from graph
+    s, d = api("GET", "/api/graph?project=debug-test-001")
+    edges = d.get("graph", {}).get("edges", [])
+    check("edge removed from graph", not any(e.get("source") == src for e in edges))
+
+    # Test unlink on non-existent relationship -> 404
+    s, d = api("POST", "/api/facts", {
+        "method": "UNLINK", "source": src, "target": tgt
+    })
+    check("unlink ghost -> 404", s == 404)
+
+    # Test unlink missing params -> 400
+    s, d = api("POST", "/api/facts", {
+        "method": "UNLINK", "source": src
+    })
+    check("unlink missing target -> 400", s == 400)
+
+    # Clean up
+    api("POST", "/api/facts", {"method": "DELETE", "id": src})
+    api("POST", "/api/facts", {"method": "DELETE", "id": tgt})
+    return True
+
+
 def T_graph():
     print("\n--- Test 8: GRAPH ---")
     s, d = api("GET", "/api/graph?project=debug-test-001")
@@ -564,6 +625,7 @@ def run_all():
         T_search()
         T_semantic_search()
         T_relationships_crud()
+        T_relationship_delete()
         T_graph()
         T_insights()
         T_rate_limit()

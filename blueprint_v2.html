@@ -509,6 +509,7 @@
 
                 <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
                     <button onclick="showNewFactForm()" style="flex: 1;"><i class="fas fa-plus"></i> New Fact</button>
+                    <button onclick="showBulkImport()" class="secondary" style="flex: 0 0 auto;"><i class="fas fa-upload"></i> Bulk Import</button>
                     <button onclick="refreshFacts()" class="secondary" style="flex: 0 0 auto;"><i class="fas fa-sync-alt"></i> Refresh</button>
                 </div>
                 <div id="crud-fact-list" class="crud-fact-list"></div>
@@ -517,7 +518,12 @@
             <!-- Knowledge Graph -->
             <div class="card">
                 <h2><i class="fas fa-project-diagram"></i> Knowledge Graph</h2>
-                <input type="text" id="graph-search" placeholder="Search nodes..." style="margin-bottom: 10px;">
+                <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                    <input type="text" id="graph-search" placeholder="Search nodes..." style="flex: 1;">
+                    <select id="edge-type-filter" style="width: 180px;">
+                        <option value="">All Edge Types</option>
+                    </select>
+                </div>
                 <div id="graph-container"></div>
                 <div id="graph-legend" class="legend"></div>
             </div>
@@ -606,18 +612,21 @@
             return data.facts || [];
         }
 
-        async function fetchGraph() {
-            const response = await fetch(`${API_BASE}/api/graph?project=debug-test-001`);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            return data.graph || { nodes: [], edges: [] };
-        }
-
         async function fetchInsights() {
             const response = await fetch(`${API_BASE}/api/graph/insights?project=debug-test-001`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             return data.insights || {};
+        }
+
+        async function fetchGraph() {
+            const edgeType = document.getElementById('edge-type-filter').value;
+            const params = new URLSearchParams({ project: 'debug-test-001' });
+            if (edgeType) params.set('edge_type', edgeType);
+            const response = await fetch(`${API_BASE}/api/graph?${params.toString()}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            return data.graph || { nodes: [], edges: [] };
         }
 
         // ===== Render Functions =====
@@ -818,6 +827,17 @@
             });
 
             currentGraphEdges = edges;
+
+            // Populate edge type filter
+            const edgeTypeFilter = document.getElementById('edge-type-filter');
+            const types = [...new Set(edges.map(e => e.type).filter(Boolean))].sort();
+            const currentVal = edgeTypeFilter.value;
+            edgeTypeFilter.innerHTML = '<option value="">All Edge Types</option>' +
+                types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+            // Restore selection
+            if (types.includes(currentVal)) {
+                edgeTypeFilter.value = currentVal;
+            }
         }
 
         function renderLegend(nodes) {
@@ -847,13 +867,18 @@
 
             let edgesHtml = '';
             if (connectedEdges.length > 0) {
-                edgesHtml = connectedEdges.map(e => {
+                edgesHtml = connectedEdges.map((e, idx) => {
                     const otherId = (e.source.id || e.source) === node.id
                         ? (e.target.id || e.target) : (e.source.id || e.source);
                     const edgeType = e.type || 'related';
-                    return `<div class="fact-item" style="margin-bottom:4px;">
-                        <span style="color:var(--color-text-secondary);font-size:0.75rem;">${escapeHtml(edgeType)}</span>
-                        <span style="color:var(--color-text-primary);font-size:0.85rem;"> → ${escapeHtml(otherId)}</span>
+                    return `<div class="fact-item" style="margin-bottom:4px; display:flex; align-items:center; justify-content:space-between;">
+                        <div>
+                            <span style="color:var(--color-text-secondary);font-size:0.75rem;">${escapeHtml(edgeType)}</span>
+                            <span style="color:var(--color-text-primary);font-size:0.85rem;"> → ${escapeHtml(otherId)}</span>
+                        </div>
+                        <button onclick="unlinkFact('${escapeHtml(node.id)}', '${escapeHtml(otherId)}', '${escapeHtml(edgeType)}')"
+                                style="color:var(--color-danger); font-size:0.7rem; padding:2px 6px;"
+                                title="Delete this relationship">✕</button>
                     </div>`;
                 }).join('');
             } else {
@@ -861,8 +886,12 @@
             }
 
             document.getElementById('modal-body').innerHTML = `
-                <strong>Full Content:</strong><br>
-                <div style="margin:8px 0;padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;border-left:3px solid ${getCategoryColor(category)}">${escapeHtml(fullContent)}</div><br>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <strong>Full Content:</strong>
+                    <button onclick="editFact('${escapeHtml(node.id)}', '${escapeHtml(fullContent)}', '${escapeHtml(category)}')"
+                            style="font-size:0.75rem; padding:2px 8px;" title="Edit this fact">✎ Edit</button>
+                </div>
+                <div style="margin:8px 0;padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;border-left:3px solid ${getCategoryColor(category)}">${escapeHtml(fullContent)}</div>
                 <strong>Category:</strong> ${escapeHtml(category)}<br>
                 <strong>Size:</strong> ${size}
                 <br><br>
@@ -918,6 +947,11 @@
             refreshGraph();
         });
 
+        // Edge type filter
+        document.getElementById('edge-type-filter').addEventListener('change', function() {
+            refreshGraph();
+        });
+
         document.getElementById('fact-search').addEventListener('input', function() {
             fetchFacts().then(facts => {
                 renderFactsList(facts, this.value);
@@ -925,6 +959,82 @@
                 console.error('Error:', err);
             });
         });
+
+        // ===== Relationship Deletion =====
+        async function unlinkFact(sourceId, targetId, edgeType) {
+            if (!confirm(`Remove relationship "${edgeType}" between ${sourceId} and ${targetId}?`)) return;
+            try {
+                const response = await fetch(`${API_BASE}/api/facts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ method: 'UNLINK', source: sourceId, target: targetId })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    closeModal();
+                    refreshGraph();
+                } else {
+                    alert('Unlink failed: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // ===== Bulk Import =====
+        function showBulkImport() {
+            const modalBody = document.getElementById('modal-body');
+            const modalTitle = document.getElementById('modal-title');
+            modalTitle.textContent = 'Bulk Import Facts';
+            modalBody.innerHTML = `
+                <div style="margin-bottom:12px;">
+                    <label style="display:block; color:var(--color-text-secondary); font-size:0.8rem; margin-bottom:6px;">
+                        Enter JSON array of facts:
+                    </label>
+                    <textarea id="bulk-input" style="width:100%; min-height:120px; background:rgba(42,46,55,0.5); border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:8px 12px; color:var(--color-text-primary); font-family:var(--font-mono); font-size:0.85rem;"
+                        placeholder='[{"id":"my-fact-001","content":"Fact content here","category":"general","project_tag":"debug-test-001"}]'></textarea>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button onclick="doBulkImport()" style="flex:1;">Import</button>
+                    <button onclick="closeModal(); refreshFacts();" class="secondary" style="flex:0 0 auto;">Cancel</button>
+                </div>
+                <div id="bulk-status" style="margin-top:8px; font-size:0.85rem;"></div>
+            `;
+            document.getElementById('node-modal').style.display = 'flex';
+        }
+
+        async function doBulkImport() {
+            const input = document.getElementById('bulk-input').value.trim();
+            const statusDiv = document.getElementById('bulk-status');
+            let facts;
+            try {
+                facts = JSON.parse(input);
+            } catch(e) {
+                statusDiv.innerHTML = '<span style="color:var(--color-danger);">✗ Invalid JSON</span>';
+                return;
+            }
+            if (!Array.isArray(facts)) {
+                statusDiv.innerHTML = '<span style="color:var(--color-danger);">✗ Must be a JSON array</span>';
+                return;
+            }
+            statusDiv.innerHTML = '<span style="color:var(--color-text-secondary);">⏳ Importing...</span>';
+            try {
+                const response = await fetch(`${API_BASE}/api/facts/bulk`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ facts: facts })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    statusDiv.innerHTML = `<span style="color:var(--color-success);">✓ Created ${data.created} facts${data.errors ? `, ${data.errors} errors` : ''}</span>`;
+                    setTimeout(() => { closeModal(); refreshFacts(); refreshGraph(); }, 1000);
+                } else {
+                    statusDiv.innerHTML = `<span style="color:var(--color-danger);">✗ ${escapeHtml(data.error || 'Unknown error')}</span>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color:var(--color-danger);">✗ ${escapeHtml(error.message)}</span>`;
+            }
+        }
 
         // ===== CRUD Functions =====
         let editingFactId = null;

@@ -455,6 +455,32 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
                 c.close()
                 self.send_json_response({'error': 'Relationship already exists'}, 409)
         
+        elif method == 'UNLINK':
+            # Delete a relationship between two facts
+            source = data.get('source')
+            target = data.get('target')
+            
+            if not source or not target:
+                self.send_json_response({'error': 'Source and target IDs required'}, 400)
+                return
+            
+            c = sqlite3.connect(DB_PATH)
+            cur = c.cursor()
+            cur.execute('DELETE FROM relationships WHERE source = ? AND target = ?', (source, target))
+            rows_deleted = cur.rowcount
+            c.commit()
+            c.close()
+            
+            if rows_deleted > 0:
+                self.send_json_response({
+                    'success': True,
+                    'source': source,
+                    'target': target,
+                    'message': 'Relationship deleted'
+                })
+            else:
+                self.send_json_response({'error': 'Relationship not found'}, 404)
+        
         elif method == 'DELETE':
             # Delete fact
             fact_id = data.get('id')
@@ -494,8 +520,8 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         
         if path == '/':
-            # Serve index.html
-            index_path = os.path.join(os.path.dirname(__file__), 'index.html')
+            # Serve blueprint_v2.html (V2 UI)
+            index_path = os.path.join(os.path.dirname(__file__), 'blueprint_v2.html')
             if os.path.exists(index_path):
                 with open(index_path, 'r') as f:
                     self.send_html_response(f.read())
