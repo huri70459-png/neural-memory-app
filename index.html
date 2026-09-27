@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Neural Memory App - Knowledge Graph Memory System">
+    <title>Neural Memory App</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            text-align: center;
+            padding: 30px 0;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        h1 {
+            font-size: 2.5rem;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+        .status {
+            color: #88c9d9;
+            font-size: 0.9rem;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .card h2 {
+            color: #fff;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+        #facts-list, #insights-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .fact-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #4f9cf9;
+        }
+        .fact-content {
+            color: #e0e0e0;
+            font-size: 0.95rem;
+        }
+        .fact-category {
+            color: #88c9d9;
+            font-size: 0.75rem;
+            margin-top: 5px;
+        }
+        #graph-container {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            height: 500px;
+        }
+        .error {
+            color: #ff6b6b;
+            padding: 15px;
+            background: rgba(255, 107, 107, 0.2);
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #88c9d9;
+        }
+        button {
+            background: linear-gradient(135deg, #4f9cf9, #2a5298);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(79, 156, 249, 0.3);
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+        }
+        .stat-box {
+            text-align: center;
+            padding: 20px;
+            background: rgba(79, 156, 249, 0.2);
+            border-radius: 10px;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #4f9cf9;
+        }
+        .stat-label {
+            color: #88c9d9;
+            font-size: 0.8rem;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-brain"></i> Neural Memory App</h1>
+            <p class="status">ID: debug-test-001 | Port: <span id="port-status">8080</span> | Embeddings: Not configured</p>
+        </header>
+        
+        <div class="grid">
+            <div class="card">
+                <h2><i class="fas fa-chart-line"></i> System Stats</h2>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-value" id="facts-count">0</div>
+                        <div class="stat-label">Facts Count</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="relationships-count">0</div>
+                        <div class="stat-label">Relationships</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="status-code">—</div>
+                        <div class="stat-label">Status</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="embeddings-status">—</div>
+                        <div class="stat-label">Embeddings</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2><i class="fas fa-sync-alt"></i> API Health</h2>
+                <button id="check-health" onclick="checkHealth()">Check Health</button>
+                <div id="health-result" class="loading">Click to check health...</div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h2><i class="fas fa-list"></i> Facts Store</h2>
+                <div id="facts-list">
+                    <div class="loading">Loading facts...</div>
+                </div>
+                <button onclick="refreshFacts()" style="margin-top: 10px;">Refresh Facts</button>
+            </div>
+            
+            <div class="card">
+                <h2><i class="fas fa-bolt"></i> Graph Insights</h2>
+                <div id="insights-list">
+                    <div class="loading">Loading insights...</div>
+                </div>
+                <button onclick="refreshInsights()" style="margin-top: 10px;">Refresh Insights</button>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2><i class="fas fa-project-diagram"></i> Knowledge Graph</h2>
+            <div id="graph-container"></div>
+        </div>
+    </div>
+
+    <script>
+        // Utility functions to prevent errors
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function formatSize(bytes) {
+            if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const unitIndex = Math.floor(Math.log(bytes) / Math.log(1024));
+            return (bytes / Math.pow(1024, unitIndex)).toFixed(2) + ' ' + units[unitIndex];
+        }
+        
+        // API base URL
+        const API_BASE = 'http://localhost:8082';
+        
+        // Update port status display
+        document.getElementById('port-status').textContent = '8082';
+        
+        // Check API health
+        async function checkHealth() {
+            const resultDiv = document.getElementById('health-result');
+            const statusCodeDiv = document.getElementById('status-code');
+            const embeddingsDiv = document.getElementById('embeddings-status');
+            
+            try {
+                resultDiv.innerHTML = '<div class="loading">Checking health...</div>';
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                
+                statusCodeDiv.textContent = response.status;
+                resultDiv.innerHTML = `<div style="color: #6bff9f;">✓ Status: ${escapeHtml(data.status)}</div>`;
+                if (data.facts_count !== undefined) {
+                    document.getElementById('facts-count').textContent = data.facts_count;
+                }
+                if (data.embeddings) {
+                    embeddingsDiv.textContent = data.embeddings;
+                }
+            } catch (error) {
+                statusCodeDiv.textContent = 'Err';
+                resultDiv.innerHTML = `<div class="error">✗ Error: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+        
+        // Fetch all facts from API
+        async function fetchFacts() {
+            try {
+                const response = await fetch(`${API_BASE}/api/facts?project=debug-test-001`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data.facts || data || [];
+            } catch (error) {
+                console.error('Error fetching facts:', error);
+                throw error;
+            }
+        }
+        
+        // Fetch graph data
+        async function fetchGraph() {
+            try {
+                const response = await fetch(`${API_BASE}/api/graph?project=debug-test-001`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data.graph || data || { nodes: [], edges: [] };
+            } catch (error) {
+                console.error('Error fetching graph:', error);
+                throw error;
+            }
+        }
+        
+        // Fetch graph insights
+        async function fetchInsights() {
+            try {
+                const response = await fetch(`${API_BASE}/api/graph/insights?project=debug-test-001`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data.insights || data || {};
+            } catch (error) {
+                console.error('Error fetching insights:', error);
+                throw error;
+            }
+        }
+        
+        // Render facts list
+        function renderFactsList(facts) {
+            const container = document.getElementById('facts-list');
+            
+            if (!facts || facts.length === 0) {
+                container.innerHTML = '<div class="loading">No facts found</div>';
+                return;
+            }
+            
+            container.innerHTML = facts.map(fact => `
+                <div class="fact-item">
+                    <div class="fact-content">${escapeHtml(fact.content || fact.text || String(fact))}</div>
+                    ${fact.category ? `<div class="fact-category">${escapeHtml(fact.category)}</div>` : ''}
+                </div>
+            `).join('');
+        }
+        
+        // Render graph visualization using D3
+        function renderGraph(graphData) {
+            const container = document.getElementById('graph-container');
+            
+            // Clear previous content
+            container.innerHTML = '';
+            
+            if (!graphData.nodes || graphData.nodes.length === 0) {
+                container.innerHTML = '<div class="loading">No graph data available</div>';
+                return;
+            }
+            
+            const width = container.clientWidth || 800;
+            const height = 500;
+            
+            // Create SVG
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', `0 0 ${width} ${height}`);
+            
+            // Create gradient for nodes
+            const defs = svg.append('defs');
+            defs.append('linearGradient')
+                .attr('id', 'node-gradient')
+                .attr('x1', '0%')
+                .attr('y1', '0%')
+                .attr('x2', '100%')
+                .attr('y2', '100%')
+                .html('<stop offset="0%" stop-color="#4f9cf9"/> <stop offset="100%" stop-color="#2a5298"/>');
+            
+            // Create zoom behavior
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 3])
+                .on('zoom', (event) => g.attr('transform', event.transform));
+            
+            svg.call(zoom);
+            
+            // Create group for zoomable content
+            const g = svg.append('g');
+            
+            // Create arrows for edges
+            const arrowDefs = svg.append('defs')
+                .append('marker')
+                .attr('id', 'arrowhead')
+                .attr('viewBox', '-0 -5 10 10')
+                .attr('refX', 20)
+                .attr('refY', 0)
+                .attr('orient', 'auto')
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .html('<path d="M 0,-5 L 10,0 L 0,5" fill="#88c9d9"/>');
+            
+            // Create edges
+            const edges = graphData.edges || [];
+            const edgeGroup = g.append('g').attr('class', 'edges');
+            
+            edgeGroup.selectAll('line')
+                .data(edges)
+                .enter()
+                .append('line')
+                .attr('class', 'edge')
+                .attr('stroke', '#88c9d9')
+                .attr('stroke-width', 2)
+                .attr('stroke-opacity', 0.7)
+                .attr('marker-end', 'url(#arrowhead)');
+            
+            // Create force simulation
+            const simulation = d3.forceSimulation(graphData.nodes)
+                .force('link', d3.forceLink(edges).id(d => d.id).distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2));
+            
+            // Create nodes
+            const nodeGroup = g.append('g').attr('class', 'nodes');
+            
+            const nodes = nodeGroup.selectAll('g')
+                .data(graphData.nodes)
+                .enter()
+                .append('g')
+                .attr('class', 'node');
+            
+            nodes.append('circle')
+                .attr('r', d => (d.size || 20))
+                .attr('fill', 'url(#node-gradient)')
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 2)
+                .attr('cursor', 'pointer');
+            
+            nodes.append('text')
+                .attr('class', 'node-label')
+                .attr('text-anchor', 'middle')
+                .attr('dy', 4)
+                .attr('fill', '#fff')
+                .style('font-size', '10px')
+                .style('pointer-events', 'none')
+                .text(d => d.label || d.id || 'Node');
+            
+            // Add click interactions
+            nodes.on('click', (event, d) => {
+                console.log('Node clicked:', d);
+            });
+            
+            // Update positions on tick
+            simulation.on('tick', () => {
+                nodes.attr('transform', d => `translate(${d.x},${d.y})`);
+                edgeGroup.selectAll('line')
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+            });
+        }
+        
+        // Render insights
+        function renderInsights(insights) {
+            const container = document.getElementById('insights-list');
+            
+            if (!insights || Object.keys(insights).length === 0) {
+                container.innerHTML = '<div class="loading">No insights available</div>';
+                return;
+            }
+            
+            const insightItems = [];
+            
+            if (insights.total_facts !== undefined) {
+                insightItems.push(`<div class="fact-item"><strong>Total Facts:</strong> ${insights.total_facts}</div>`);
+            }
+            
+            if (insights.relationship_count !== undefined) {
+                insightItems.push(`<div class="fact-item"><strong>Relationships:</strong> ${insights.relationship_count}</div>`);
+            }
+            
+            if (insights.keyword_analysis) {
+                insightItems.push(`<div class="fact-item"><strong>Keyword Analysis:</strong> ${Object.keys(insights.keyword_analysis).join(', ')}</div>`);
+            }
+            
+            if (insights.memory_patterns) {
+                insightItems.push(`<div class="fact-item"><strong>Memory Patterns:</strong> ${Object.keys(insights.memory_patterns).join(', ')}</div>`);
+            }
+            
+            if (insights.decision_keywords) {
+                insightItems.push(`<div class="fact-item"><strong>Decision Keywords:</strong> ${insights.decision_keywords.join(', ')}</div>`);
+            }
+            
+            container.innerHTML = insightItems.join('') || '<div class="loading">No insights available</div>';
+        }
+        
+        // Refresh facts
+        async function refreshFacts() {
+            const container = document.getElementById('facts-list');
+            container.innerHTML = '<div class="loading">Refreshing facts...</div>';
+            
+            try {
+                const facts = await fetchFacts();
+                renderFactsList(facts);
+            } catch (error) {
+                container.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        // Refresh insights
+        async function refreshInsights() {
+            const container = document.getElementById('insights-list');
+            container.innerHTML = '<div class="loading">Refreshing insights...</div>';
+            
+            try {
+                const insights = await fetchInsights();
+                renderInsights(insights);
+            } catch (error) {
+                container.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        // Refresh graph
+        async function refreshGraph() {
+            const container = document.getElementById('graph-container');
+            container.innerHTML = '<div class="loading">Refreshing graph...</div>';
+            
+            try {
+                const graphData = await fetchGraph();
+                renderGraph(graphData);
+            } catch (error) {
+                container.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        // Initialize on page load
+        async function init() {
+            await checkHealth();
+            await refreshFacts();
+            await refreshInsights();
+            await refreshGraph();
+        }
+        
+        // Run initialization
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

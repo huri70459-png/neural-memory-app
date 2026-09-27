@@ -1,0 +1,7 @@
+{
+  "name": "debug-test-001",
+  "version": "1.0.0",
+  "description": "Neural Memory App with graph visualization",
+  "features": ["embeddings", "semantic-search", "graph-viz", "crud-api"],
+  "status": "enhancement-phase-start"
+}
