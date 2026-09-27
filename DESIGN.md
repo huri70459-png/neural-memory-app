@@ -83,14 +83,15 @@ spacing:
   xl: 32px
 components:
   button-primary:
-    backgroundColor: "{colors.tertiary}"
-    textColor: "#FFFFFF"
+    backgroundColor: "linear-gradient(135deg, {colors.tertiary}, {colors.info})"
+    textColor: "#0A0B0C"
     typography: "{typography.body-md}"
     rounded: "{rounded.md}"
     padding: "10px 20px"
+    hover: "shimmer sweep + translateY(-2px) + box-shadow elevation"
   button-primary-hover:
     backgroundColor: "{colors.accent}"
-    textColor: "#1A1C1E"
+    textColor: "#0A0B0C"
     typography: "{typography.body-md}"
     rounded: "{rounded.md}"
     padding: "10px 20px"
@@ -166,13 +167,33 @@ This is the gap we own: **ultra-portable, zero-config, agent-native memory.**
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| **Primary** `{colors.primary}` | `#1A1C1E` | Page background |
-| **Surface** `{colors.surface}` | `#0F1113` | Card backgrounds |
-| **Tertiary** `{colors.tertiary}` | `#4F9CF9` | Primary accent |
-| **Accent** `{colors.accent}` | `#6BFF9F` | Hover states |
+| **Primary** `{colors.primary}` | `#0A0B0C` | Page background (deepest) |
+| **Surface** `{colors.surface}` | `#0F1113` | Main surface |
+| **Surface Elevated** `{colors.surface-elevated}` | `#14161A` | Card backgrounds |
+| **Surface Overlay** `{colors.surface-overlay}` | `#1A1C1E` | Modal overlays |
 | **Border** `{colors.border}` | `#2A2E37` | Dividers, input borders |
-| **Text Primary** `{colors.text-primary}` | `#E0E0E0` | Body text |
+| **Border Strong** `{colors.border-strong}` | `#373B47` | Strong dividers |
+| **Border Weak** `{colors.border-weak}` | `#24272F` | Subtle internal lines |
+| **Text Primary** `{colors.text-primary}` | `#E6E6E9` | Body text |
+| **Text Secondary** `{colors.text-secondary}` | `#9CA3AF` | Secondary text |
+| **Text Tertiary** `{colors.text-tertiary}` | `#6B7280` | Tertiary/muted text |
+| **Tertiary** `{colors.tertiary}` | `#4F9CF5` | Primary accent (blue) |
+| **Accent** `{colors.accent}` | `#6BFF9F` | Secondary accent (green) |
+| **Info** `{colors.info}` | `#06B6D4` | Info accents |
 | **Warning** `{colors.warning}` | `#F59E0B` | Warnings |
+
+### Analytics Visualization Palette
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| **Viz-1** | `#4F9CF5` | Category bar #1 |
+| **Viz-2** | `#6BFF9F` | Category bar #2 |
+| **Viz-3** | `#FF9F43` | Category bar #3 |
+| **Viz-4** | `#A78BFA` | Category bar #4 |
+| **Viz-5** | `#EC4899` | Category bar #5 |
+| **Viz-6** | `#FBBF24` | Category bar #6 |
+| **Viz-7** | `#3B82F6` | Category bar #7 |
+| **Viz-8** | `#10B981` | Category bar #8 |
 
 ### Semantic Categories (Graph Nodes)
 
@@ -285,16 +306,22 @@ Fact form fields.
 ## Do's and Don'ts
 
 ### Do
+- Use the full 5-layer dark stack (`#0A0B0C` → `#14161A` → `#2A2E37`) for depth — never flat `#000`
+- Apply `backdrop-filter: blur(24px)` consistently across all cards, headers, and nav containers
+- Use shimmer sweep pseudo-element on primary buttons (`::before` linear sweep)
 - Use category colors consistently — each fact category maps to its token
-- Maintain `backdrop-filter: blur(10px)` on all cards for depth
-- Keep graph node hover states active for discoverability
-- Use `window.location.origin` for API base (never hardcode ports)
+- Maintain `backdrop-filter: blur(10px)` on all cards for depth (upgraded to `blur(24px)`)
+- Use `var(--ease-out)` and `var(--ease-in-out)` for all transitions — no default `ease`
+- Apply `fadeInUp` entrance animation to cards with stagger delays
 
 ### Don't
+- Don't use flat colors for cards — always use rgba with blur
+- Don't use harsh borders — use `var(--color-border-weak)` for internal lines, `var(--color-border)` for container borders
+- Don't use `translateY(-2px)` alone on hover — combine with `box-shadow` elevation
+- Don't use white text `#FFFFFF` — use `var(--color-text-primary)` (`#E6E6E9`)
 - Don't use centered layouts for data-dense surfaces (Monitor archetype)
 - Don't add unearned glassmorphism — every blur has a reason
 - Don't invent new colors beyond the token set
-- Don't use hero+3-cards composition on dashboard surfaces
 
 ## Accessibility
 
