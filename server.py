@@ -767,7 +767,7 @@ class MemoryAppHandler(BaseHTTPRequestHandler):
                 }
             })
         
-        elif path.startswith('/api/graph'):
+        elif path == '/api/graph' or path.startswith('/api/graph?'):
             # Get graph data
             project = query.get('project', [PROJECT_ID])[0]
             edge_type_filter = query.get('edge_type', [None])[0]
