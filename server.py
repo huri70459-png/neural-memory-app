@@ -121,59 +121,45 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Drop existing tables for clean start (prevents duplicates)
-    cursor.execute('DROP TABLE IF EXISTS relationships')
-    cursor.execute('DROP TABLE IF EXISTS facts')
-    cursor.execute('DROP TABLE IF EXISTS keywords')
+    # Create tables only if they don't exist (preserves existing data)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS facts (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        category TEXT,
+        timestamp TEXT,
+        project_tag TEXT,
+        embedding TEXT
+    )''')
     
-    # Create facts table
-    cursor.execute('''
-        CREATE TABLE facts (
-            id TEXT PRIMARY KEY,
-            content TEXT NOT NULL,
-            category TEXT,
-            timestamp TEXT,
-            project_tag TEXT,
-            embedding TEXT
-        )
-    ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS relationships (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT,
+        target TEXT,
+        type TEXT,
+        FOREIGN KEY (source) REFERENCES facts (id),
+        FOREIGN KEY (target) REFERENCES facts (id)
+    )''')
     
-    # Create relationships table
-    cursor.execute('''
-        CREATE TABLE relationships (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source TEXT,
-            target TEXT,
-            type TEXT,
-            FOREIGN KEY (source) REFERENCES facts (id),
-            FOREIGN KEY (target) REFERENCES facts (id)
-        )
-    ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS keywords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fact_id TEXT,
+        keyword TEXT,
+        weight REAL,
+        FOREIGN KEY (fact_id) REFERENCES facts (id)
+    )''')
     
-    # Create search table for keyword indexing
-    cursor.execute('''
-        CREATE TABLE keywords (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fact_id TEXT,
-            keyword TEXT,
-            weight REAL,
-            FOREIGN KEY (fact_id) REFERENCES facts (id)
-        )
-    ''')
-    
-    # Insert sample facts with project_tag
-    for fact in SAMPLE_FACTS:
-        cursor.execute('''
-            INSERT INTO facts (id, content, category, timestamp, project_tag)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (fact['id'], fact['content'], fact['category'], fact['timestamp'], PROJECT_ID))
-    
-    # Insert sample relationships
-    for rel in SAMPLE_RELATIONSHIPS:
-        cursor.execute('''
-            INSERT INTO relationships (source, target, type)
-            VALUES (?, ?, ?)
-        ''', (rel['source'], rel['target'], rel['type']))
+    # Check if we need to seed initial data
+    cursor.execute('SELECT COUNT(*) FROM facts')
+    if cursor.fetchone()[0] == 0:
+        # Insert sample facts with project_tag
+        for fact in SAMPLE_FACTS:
+            cursor.execute('''INSERT INTO facts (id, content, category, timestamp, project_tag)
+            VALUES (?, ?, ?, ?, ?)''', (fact['id'], fact['content'], fact['category'], fact['timestamp'], PROJECT_ID))
+        
+        # Insert sample relationships
+        for rel in SAMPLE_RELATIONSHIPS:
+            cursor.execute('''INSERT INTO relationships (source, target, type)
+            VALUES (?, ?, ?)''', (rel['source'], rel['target'], rel['type']))
     
     conn.commit()
     conn.close()
